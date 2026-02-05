@@ -49,7 +49,9 @@ function safeJsonParse(text: string): unknown {
 }
 
 function hasLocalStorage(): boolean {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+  return (
+    typeof window !== "undefined" && typeof window.localStorage !== "undefined"
+  );
 }
 
 export function makeEmptyDay(ymd: string): AchieveDay {
@@ -66,7 +68,6 @@ export function loadDay(ymd: string): AchieveDay {
   const parsed = safeJsonParse(raw);
   if (!isAchieveDay(parsed)) return makeEmptyDay(ymd);
 
-  // ymd が一致しないデータは、念のため空にする
   if (parsed.ymd !== ymd) return makeEmptyDay(ymd);
 
   return parsed;
@@ -100,4 +101,32 @@ export function createId(): string {
     return c.randomUUID();
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+/**
+ * localStorage に保存されている「日付データ」を列挙して返す（新しい日付が先）
+ * - SSRでは使えない（ブラウザ専用）
+ */
+export function listDays(): AchieveDay[] {
+  if (!hasLocalStorage()) return [];
+
+  const days: AchieveDay[] = [];
+  const ls = window.localStorage;
+
+  for (let i = 0; i < ls.length; i += 1) {
+    const key = ls.key(i);
+    if (!key) continue;
+    if (!key.startsWith(KEY_PREFIX)) continue;
+
+    const raw = ls.getItem(key);
+    if (!raw) continue;
+
+    const parsed = safeJsonParse(raw);
+    if (!isAchieveDay(parsed)) continue;
+
+    days.push(parsed);
+  }
+
+  days.sort((a, b) => b.ymd.localeCompare(a.ymd));
+  return days;
 }
