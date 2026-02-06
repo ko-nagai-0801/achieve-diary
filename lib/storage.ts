@@ -21,28 +21,28 @@ export type DayEntry = {
   day: AchieveDay;
 };
 
-const DAY_KEY_PREFIX = "achieve:day:";
+export const DAY_KEY_PREFIX = "achieve:day:";
 
 /**
- * キャッシュの鮮度判定用（saveDay が通れば更新される）
- * ※もしTodayが直接 localStorage.setItem をしているなら、ここが更新されないので
- *   key統計で差分検知して走査します（完全ではないが「追加」は救える）
+ * キャッシュ鮮度のキー（saveDay 経由で更新される）
  */
-const META_UPDATED_AT_KEY = "achieve:meta:lastUpdatedAt";
+export const META_UPDATED_AT_KEY = "achieve:meta:lastUpdatedAt";
 
-type Listener = () => void;
+type StorageMutationListener = () => void;
 
-let daysCache: DayEntry[] | null = null;
-let daysCacheStamp: string | null = null;
+const mutationListeners = new Set<StorageMutationListener>();
 
-// Today が saveDay を通さずに key を増やしたケースなどを救うための軽量統計
-let daysCacheKeyCount = 0;
-let daysCacheMaxYmd = "";
+function emitStorageMutation(): void {
+  for (const l of mutationListeners) l();
+}
 
-const listeners = new Set<Listener>();
-
-let storageListenerRefCount = 0;
-let isStorageListenerAttached = false;
+/**
+ * saveDay() など “このタブ内での永続化” をフックしたい側（days-store等）のため
+ */
+export function subscribeStorageMutations(listener: StorageMutationListener): () => void {
+  mutationListeners.add(listener);
+  return () => mutationListeners.delete(listener);
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -50,35 +50,6 @@ function nowIso(): string {
 
 function isBrowser(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
-}
-
-function emitChange(): void {
-  for (const l of listeners) l();
-}
-
-function attachStorageListener(): void {
-  if (!isBrowser()) return;
-  if (isStorageListenerAttached) return;
-
-  window.addEventListener("storage", onStorageEvent);
-  isStorageListenerAttached = true;
-}
-
-function detachStorageListener(): void {
-  if (!isBrowser()) return;
-  if (!isStorageListenerAttached) return;
-
-  window.removeEventListener("storage", onStorageEvent);
-  isStorageListenerAttached = false;
-}
-
-function onStorageEvent(e: StorageEvent): void {
-  // 他タブ更新などで localStorage が変わったらキャッシュを捨てて通知
-  const k = e.key ?? "";
-  if (k === META_UPDATED_AT_KEY || k.startsWith(DAY_KEY_PREFIX)) {
-    invalidateDaysCache();
-    emitChange();
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -93,7 +64,7 @@ function safeJsonParse(raw: string): unknown {
   }
 }
 
-function isYmdString(v: string): boolean {
+export function isYmdString(v: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(v);
 }
 
@@ -178,33 +149,25 @@ export function loadDay(ymd: string): AchieveDay {
   return normalizeDay(ymd, safeJsonParse(raw));
 }
 
-export function invalidateDaysCache(): void {
-  daysCache = null;
-  daysCacheStamp = null;
-  daysCacheKeyCount = 0;
-  daysCacheMaxYmd = "";
-}
+export function saveDay(day: AchieveDay): void {
+  if (!isBrowser()) return;
 
-function readStamp(storage: Storage): string {
-  return storage.getItem(META_UPDATED_AT_KEY) ?? "";
-}
+  const ymd = day.ymd;
+  if (!isYmdString(ymd)) return;
 
-function computeKeyStats(storage: Storage): { count: number; maxYmd: string } {
-  let count = 0;
-  let maxYmd = "";
+  const payload: AchieveDay = {
+    ymd,
+    items: Array.isArray(day.items) ? day.items : [],
+    mood: day.mood ?? null,
+    memo: typeof day.memo === "string" ? day.memo : "",
+    updatedAt: nowIso(),
+  };
 
-  for (let i = 0; i < storage.length; i++) {
-    const k = storage.key(i);
-    if (!k || !k.startsWith(DAY_KEY_PREFIX)) continue;
+  window.localStorage.setItem(dayKey(ymd), JSON.stringify(payload));
+  window.localStorage.setItem(META_UPDATED_AT_KEY, nowIso());
 
-    const ymd = k.slice(DAY_KEY_PREFIX.length);
-    if (!isYmdString(ymd)) continue;
-
-    count += 1;
-    if (ymd.localeCompare(maxYmd) > 0) maxYmd = ymd;
-  }
-
-  return { count, maxYmd };
+  // 同一タブ内の購読者（days-store）が即反応できるように通知
+  emitStorageMutation();
 }
 
 export function scanDaysFromStorage(storage: Storage): DayEntry[] {
@@ -225,88 +188,5 @@ export function scanDaysFromStorage(storage: Storage): DayEntry[] {
   }
 
   out.sort((a, b) => b.ymd.localeCompare(a.ymd));
-
-  // 走査結果から統計も更新
-  daysCacheKeyCount = out.length;
-  daysCacheMaxYmd = out[0]?.ymd ?? "";
-
   return out;
-}
-
-/**
- * モジュールスコープキャッシュ取得
- * - METAスタンプ一致ならキャッシュ
- * - Todayが saveDay を通さず key を追加した場合は、key統計の差分で再走査
- */
-export function getDaysCached(storage?: Storage): DayEntry[] {
-  if (!isBrowser()) return [];
-
-  const st = storage ?? window.localStorage;
-  const stamp = readStamp(st);
-
-  if (Array.isArray(daysCache) && daysCacheStamp === stamp) {
-    const stats = computeKeyStats(st);
-    // key増減 or 最新ymdの変化（追加）を検知できたら再走査
-    if (stats.count === daysCacheKeyCount && stats.maxYmd === daysCacheMaxYmd) {
-      return daysCache;
-    }
-  }
-
-  const scanned = scanDaysFromStorage(st);
-  daysCache = scanned;
-  daysCacheStamp = stamp;
-  return scanned;
-}
-
-/**
- * 強制再走査（ボタン操作など用）
- */
-export function refreshDaysCache(storage?: Storage): DayEntry[] {
-  if (!isBrowser()) return [];
-  const st = storage ?? window.localStorage;
-
-  invalidateDaysCache();
-  const next = getDaysCached(st);
-  emitChange();
-  return next;
-}
-
-/**
- * useSyncExternalStore 用購読
- */
-export function subscribeDays(listener: Listener): () => void {
-  listeners.add(listener);
-
-  storageListenerRefCount += 1;
-  if (storageListenerRefCount === 1) attachStorageListener();
-
-  return () => {
-    listeners.delete(listener);
-
-    storageListenerRefCount = Math.max(0, storageListenerRefCount - 1);
-    if (storageListenerRefCount === 0) detachStorageListener();
-  };
-}
-
-export function saveDay(day: AchieveDay): void {
-  if (!isBrowser()) return;
-
-  const ymd = day.ymd;
-  if (!isYmdString(ymd)) return;
-
-  const payload: AchieveDay = {
-    ymd,
-    items: Array.isArray(day.items) ? day.items : [],
-    mood: day.mood ?? null,
-    memo: typeof day.memo === "string" ? day.memo : "",
-    updatedAt: nowIso(),
-  };
-
-  // 先に保存 → スタンプ更新
-  window.localStorage.setItem(dayKey(ymd), JSON.stringify(payload));
-  window.localStorage.setItem(META_UPDATED_AT_KEY, nowIso());
-
-  // キャッシュ無効化 → 通知
-  invalidateDaysCache();
-  emitChange();
 }

@@ -11,13 +11,9 @@ import {
   normalizeAliasKey,
   type TagAliases,
 } from "@/lib/diary";
-import {
-  getDaysCached,
-  refreshDaysCache,
-  type DayEntry,
-  type AchieveItem,
-} from "@/lib/storage";
+import { type AchieveItem, type DayEntry } from "@/lib/storage";
 import { runIdle, type CancelFn } from "@/lib/client-scheduler";
+import { useDaysData } from "@/lib/useDaysData";
 
 type SearchMode = "text" | "tag";
 
@@ -54,102 +50,72 @@ export default function HistoryClient() {
   const mode: SearchMode = searchParams.get("mode") === "tag" ? "tag" : "text";
   const q = searchParams.get("q") ?? "";
 
-  // 初期表示は同期で取得（useEffect内setStateを避ける）
-  const [entries, setEntries] = useState<DayEntry[]>(() => {
-    if (typeof window === "undefined") return [];
-    return getDaysCached(window.localStorage);
-  });
-
   const [aliases, setAliases] = useState<TagAliases>(() => {
     if (typeof window === "undefined") return {};
     return loadTagAliases(window.localStorage);
   });
 
-  // B+C: idleで読み込み + 間引き + 二重予約防止
-  const refreshGateRef = useRef<number>(0);
-  const refreshJobCancelRef = useRef<CancelFn | null>(null);
+  // aliases も idle で更新（effect内の同期setStateを避ける）
+  const aliasesJobCancelRef = useRef<CancelFn | null>(null);
 
-  const refreshNow = useCallback(() => {
-    const storage = window.localStorage;
+  const requestAliasesRefresh = useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (aliasesJobCancelRef.current) return;
 
-    // まずキャッシュ（軽い）
-    const cached = getDaysCached(storage);
-
-    // ✅ もしキャッシュが空なら、強制再走査で救う（TodayがsaveDayを通さない等）
-    if (cached.length === 0) {
-      const rescanned = refreshDaysCache(storage);
-      setEntries(rescanned);
-    } else {
-      setEntries(cached);
-    }
-
-    setAliases(loadTagAliases(storage));
+    aliasesJobCancelRef.current = runIdle(() => {
+      aliasesJobCancelRef.current = null;
+      setAliases(loadTagAliases(window.localStorage));
+    });
   }, []);
 
-  const requestRefresh = useCallback(() => {
-    const now = Date.now();
-    if (now - refreshGateRef.current < 500) return;
-    refreshGateRef.current = now;
-
-    if (refreshJobCancelRef.current) return;
-
-    refreshJobCancelRef.current = runIdle(() => {
-      refreshJobCancelRef.current = null;
-      refreshNow();
-    });
-  }, [refreshNow]);
-
   useEffect(() => {
-    // ✅ 初回は「予約」だけ（effect内でsetStateを同期実行しない）
-    requestRefresh();
-
-    const onFocus = () => requestRefresh();
-    const onVis = () => {
-      if (document.visibilityState === "visible") requestRefresh();
-    };
-
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVis);
-
     return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVis);
-
-      if (refreshJobCancelRef.current) refreshJobCancelRef.current();
-      refreshJobCancelRef.current = null;
+      if (aliasesJobCancelRef.current) aliasesJobCancelRef.current();
+      aliasesJobCancelRef.current = null;
     };
-  }, [requestRefresh]);
+  }, []);
+
+  const { entries, isLoading, requestRefresh } = useDaysData({
+    enabled: true,
+    refreshOnMount: true,
+    refreshOnFocus: true,
+    refreshOnVisible: true,
+    throttleMs: 500,
+    onRefreshRequested: requestAliasesRefresh,
+  });
+
+  const listEntries: DayEntry[] = useMemo(() => entries ?? [], [entries]);
 
   const tagQ = useMemo(() => tagQueryCanonical(q, aliases), [q, aliases]);
 
   const filteredEntries = useMemo(() => {
     const tq = q.trim();
-    if (!tq) return entries;
+    if (!tq) return listEntries;
 
     if (mode === "tag") {
-      if (!tagQ) return entries;
-      return entries.filter((e) => e.day.items.some((it) => itemMatchesTag(it, tagQ, aliases)));
+      if (!tagQ) return listEntries;
+      return listEntries.filter((e) => e.day.items.some((it) => itemMatchesTag(it, tagQ, aliases)));
     }
 
-    return entries.filter((e) => {
+    return listEntries.filter((e) => {
       if (includesQuery(e.ymd, tq)) return true;
       return e.day.items.some((it) => itemMatchesText(it, tq));
     });
-  }, [entries, q, mode, tagQ, aliases]);
+  }, [listEntries, q, mode, tagQ, aliases]);
 
   const [selectedYmd, setSelectedYmd] = useState<string | null>(null);
 
   const effectiveSelectedYmd = useMemo(() => {
-    const list = q.trim() ? filteredEntries : entries;
+    const list = q.trim() ? filteredEntries : listEntries;
     if (list.length === 0) return null;
     if (selectedYmd && list.some((e) => e.ymd === selectedYmd)) return selectedYmd;
     return list[0]?.ymd ?? null;
-  }, [entries, filteredEntries, q, selectedYmd]);
+  }, [listEntries, filteredEntries, q, selectedYmd]);
 
   const selected = useMemo(() => {
     if (!effectiveSelectedYmd) return null;
-    return entries.find((e) => e.ymd === effectiveSelectedYmd) ?? null;
-  }, [entries, effectiveSelectedYmd]);
+    return listEntries.find((e) => e.ymd === effectiveSelectedYmd) ?? null;
+  }, [listEntries, effectiveSelectedYmd]);
 
   const visibleItems = useMemo(() => {
     if (!selected) return [];
@@ -178,10 +144,10 @@ export default function HistoryClient() {
   const tagSuggestions = useMemo(() => {
     if (mode !== "tag") return [];
     if (!showSuggest) return [];
-    if (entries.length === 0) return [];
+    if (listEntries.length === 0) return [];
 
     const count = new Map<string, number>();
-    for (const e of entries) {
+    for (const e of listEntries) {
       for (const it of e.day.items) {
         const tags = extractTags(it.text, aliases);
         for (const t of tags) count.set(t, (count.get(t) ?? 0) + 1);
@@ -215,21 +181,28 @@ export default function HistoryClient() {
     });
 
     return filtered.slice(0, 8);
-  }, [entries, aliases, q, mode, showSuggest]);
+  }, [listEntries, aliases, q, mode, showSuggest]);
+
+  const totalDaysText = useMemo(() => {
+    if (isLoading) return "読み込み中…";
+    if (q.trim()) return `検索結果：${filteredEntries.length} 日`;
+    return `全体：${listEntries.length} 日`;
+  }, [isLoading, q, filteredEntries.length, listEntries.length]);
 
   return (
     <main className="mx-auto w-full max-w-3xl p-4 md:p-6">
       <header className="mb-6 flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">履歴</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            localStorage から読み取り、検索・詳細表示します。
-          </p>
+          <p className="mt-1 text-sm text-zinc-400">localStorage から読み取り、検索・詳細表示します。</p>
         </div>
 
         <button
           type="button"
-          onClick={requestRefresh}
+          onClick={() => {
+            requestRefresh();
+            requestAliasesRefresh();
+          }}
           className="shrink-0 whitespace-nowrap rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900"
         >
           更新
@@ -241,11 +214,7 @@ export default function HistoryClient() {
           <div className="flex items-end justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-zinc-200">日付一覧</h2>
-              <p className="mt-1 text-xs text-zinc-500">
-                {q.trim()
-                  ? `検索結果：${filteredEntries.length} 日`
-                  : `全体：${entries.length} 日`}
-              </p>
+              <p className="mt-1 text-xs text-zinc-500">{totalDaysText}</p>
             </div>
           </div>
 
@@ -257,11 +226,7 @@ export default function HistoryClient() {
                   onChange={(e) => setQueryToUrl(e.target.value)}
                   onFocus={() => setShowSuggest(true)}
                   onBlur={() => setShowSuggest(false)}
-                  placeholder={
-                    mode === "tag"
-                      ? "タグ検索（例：#健康 / けんこう / health）"
-                      : "本文検索（例：散歩 / 洗い物）"
-                  }
+                  placeholder={mode === "tag" ? "タグ検索（例：#健康 / けんこう / health）" : "本文検索（例：散歩 / 洗い物）"}
                   className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
                 />
 
@@ -281,9 +246,7 @@ export default function HistoryClient() {
                             className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm text-zinc-100 hover:bg-zinc-900"
                           >
                             <span className="truncate">#{s.tag}</span>
-                            <span className="ml-3 shrink-0 text-xs text-zinc-400">
-                              × {s.count}
-                            </span>
+                            <span className="ml-3 shrink-0 text-xs text-zinc-400">× {s.count}</span>
                           </button>
                         </li>
                       ))}
@@ -310,9 +273,7 @@ export default function HistoryClient() {
                   onClick={() => setModeToUrl("text")}
                   className={
                     "rounded-lg px-3 py-1.5 text-xs transition " +
-                    (mode === "text"
-                      ? "bg-zinc-200 text-zinc-900"
-                      : "text-zinc-200 hover:bg-zinc-900")
+                    (mode === "text" ? "bg-zinc-200 text-zinc-900" : "text-zinc-200 hover:bg-zinc-900")
                   }
                 >
                   本文
@@ -322,28 +283,24 @@ export default function HistoryClient() {
                   onClick={() => setModeToUrl("tag")}
                   className={
                     "rounded-lg px-3 py-1.5 text-xs transition " +
-                    (mode === "tag"
-                      ? "bg-zinc-200 text-zinc-900"
-                      : "text-zinc-200 hover:bg-zinc-900")
+                    (mode === "tag" ? "bg-zinc-200 text-zinc-900" : "text-zinc-200 hover:bg-zinc-900")
                   }
                 >
                   タグ
                 </button>
               </div>
 
-              {mode === "tag" ? (
-                <p className="text-xs text-zinc-500">
-                  ※表記ゆれ辞書で統一（/insightsで編集）
-                </p>
-              ) : null}
+              {mode === "tag" ? <p className="text-xs text-zinc-500">※表記ゆれ辞書で統一（/insightsで編集）</p> : null}
             </div>
           </div>
 
-          {filteredEntries.length === 0 ? (
+          {isLoading ? (
             <div className="mt-4 rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-400">
-              {q.trim()
-                ? "一致する履歴がありません。"
-                : "まだ履歴がありません。/today で追加してみましょう。"}
+              読み込み中…
+            </div>
+          ) : filteredEntries.length === 0 ? (
+            <div className="mt-4 rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-400">
+              {q.trim() ? "一致する履歴がありません。" : "まだ履歴がありません。/today で追加してみましょう。"}
             </div>
           ) : (
             <ul className="mt-4 space-y-2">
@@ -358,9 +315,7 @@ export default function HistoryClient() {
                       onClick={() => setSelectedYmd(e.ymd)}
                       className={
                         "w-full rounded-xl border px-3 py-2 text-left transition " +
-                        (active
-                          ? "border-zinc-600 bg-zinc-950/60"
-                          : "border-zinc-800 bg-zinc-950/40 hover:bg-zinc-900")
+                        (active ? "border-zinc-600 bg-zinc-950/60" : "border-zinc-800 bg-zinc-950/40 hover:bg-zinc-900")
                       }
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -402,13 +357,8 @@ export default function HistoryClient() {
                 ) : (
                   <ul className="mt-2 space-y-2">
                     {visibleItems.map((it) => (
-                      <li
-                        key={it.id}
-                        className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
-                      >
-                        <p className="whitespace-pre-wrap break-words text-zinc-100">
-                          {it.text}
-                        </p>
+                      <li key={it.id} className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2">
+                        <p className="whitespace-pre-wrap break-words text-zinc-100">{it.text}</p>
                         <p className="mt-1 text-xs text-zinc-500">
                           {new Date(it.createdAt).toLocaleString("ja-JP", {
                             timeZone: "Asia/Tokyo",
@@ -422,8 +372,7 @@ export default function HistoryClient() {
                 )}
 
                 <p className="mt-3 text-xs text-zinc-500">
-                  ※改行表示：<span className="font-semibold">whitespace-pre-wrap</span>{" "}
-                  を使用
+                  ※改行表示：<span className="font-semibold">whitespace-pre-wrap</span> を使用
                 </p>
               </div>
             </div>
