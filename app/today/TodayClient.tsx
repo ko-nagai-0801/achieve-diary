@@ -238,7 +238,9 @@ export default function TodayClient() {
     const tokenNorm = normalizeAliasKey(activeTag?.token ?? "");
     if (!tokenNorm) return allSuggestions.slice(0, 10);
 
-    return allSuggestions.filter((s) => s.matchKeys.some((k) => k.includes(tokenNorm))).slice(0, 10);
+    return allSuggestions
+      .filter((s) => s.matchKeys.some((k) => k.includes(tokenNorm)))
+      .slice(0, 10);
   }, [shouldShowSuggest, activeTag, allSuggestions]);
 
   function flashSaved() {
@@ -454,7 +456,7 @@ export default function TodayClient() {
   }
 
   return (
-    <main className="w-full p-4 md:p-6">
+    <main className="mx-auto w-full max-w-3xl p-4 md:p-6">
       <section className="space-y-6">
         <header className="space-y-2">
           <p className="text-sm text-zinc-400">{ymd}</p>
@@ -602,7 +604,10 @@ export default function TodayClient() {
                 const isConfirmingDelete = confirmDeleteId === item.id;
 
                 return (
-                  <li key={item.id} className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2">
+                  <li
+                    key={item.id}
+                    className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2"
+                  >
                     <div className="flex items-start gap-3">
                       <div className="min-w-0 flex-1">
                         {isEditing ? (
@@ -665,7 +670,9 @@ export default function TodayClient() {
                                 </button>
                               )}
 
-                              <p className="ml-auto text-xs text-zinc-500">⌘/Ctrl+Enter=保存 / Esc=キャンセル（Enterは改行）</p>
+                              <p className="ml-auto text-xs text-zinc-500">
+                                ⌘/Ctrl+Enter=保存 / Esc=キャンセル（Enterは改行）
+                              </p>
                             </div>
                           </>
                         ) : (
@@ -677,11 +684,17 @@ export default function TodayClient() {
                               aria-label="編集"
                               title="クリックで編集"
                             >
-                              <p className="whitespace-pre-wrap break-words text-zinc-100">{item.text}</p>
+                              <p className="whitespace-pre-wrap break-words text-zinc-100">
+                                {item.text}
+                              </p>
                             </button>
 
                             <p className="mt-1 text-xs text-zinc-500">
-                              {new Date(item.createdAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" })}
+                              {new Date(item.createdAt).toLocaleString("ja-JP", {
+                                timeZone: "Asia/Tokyo",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
                             </p>
                           </>
                         )}
@@ -748,7 +761,9 @@ export default function TodayClient() {
                     onClick={() => setMood(m)}
                     className={[
                       "rounded-xl border px-3 py-2 text-sm",
-                      selected ? "border-zinc-200 bg-zinc-200 text-zinc-900" : "border-zinc-800 text-zinc-200 hover:bg-zinc-900",
+                      selected
+                        ? "border-zinc-200 bg-zinc-200 text-zinc-900"
+                        : "border-zinc-800 text-zinc-200 hover:bg-zinc-900",
                     ].join(" ")}
                     aria-pressed={selected}
                     title={selected ? "もう一度押すと解除" : "選択"}
@@ -759,7 +774,9 @@ export default function TodayClient() {
               })}
             </div>
 
-            <p className="mt-2 text-xs text-zinc-500">※同じボタンをもう一度押すと「未設定」に戻ります</p>
+            <p className="mt-2 text-xs text-zinc-500">
+              ※同じボタンをもう一度押すと「未設定」に戻ります
+            </p>
           </div>
 
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
