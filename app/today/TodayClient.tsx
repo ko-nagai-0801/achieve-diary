@@ -18,11 +18,11 @@ function nowIso(): string {
 }
 
 export default function TodayClient() {
-  // ✅ useRefをrenderで読まない（lint対策）
+  // 今日の日付は「この表示セッション中は固定」でOK（MVP）
   const [ymd] = useState<string>(() => formatJstYmd());
   const long = useMemo(() => formatJstLong(), []);
 
-  // ✅ 初期描画で localStorage からロード（ssr:false なのでOK）
+  // 初期描画で localStorage からロード（Client ComponentなのでOK）
   const [day, setDay] = useState<AchieveDay>(() => loadDay(ymd));
   const [text, setText] = useState<string>("");
 
@@ -30,6 +30,9 @@ export default function TodayClient() {
   const saveTimerRef = useRef<number | null>(null);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // ✅ 二重追加防止（Enterリピート / 連打対策）
+  const addLockRef = useRef<boolean>(false);
 
   useEffect(() => {
     // unmount時にタイマーだけ掃除（setStateしない）
@@ -64,26 +67,38 @@ export default function TodayClient() {
   }
 
   function addItem() {
+    if (addLockRef.current) return;
+
     const v = text.trim();
     if (!v) return;
 
-    const item: AchieveItem = {
-      id: createId(),
-      text: v,
-      done: false,
-      createdAt: nowIso(),
-    };
+    // lock（同一瞬間の二重実行を止める）
+    addLockRef.current = true;
 
-    const next: AchieveDay = {
-      ...day,
-      items: [item, ...day.items],
-    };
+    try {
+      const item: AchieveItem = {
+        id: createId(),
+        text: v,
+        done: false,
+        createdAt: nowIso(),
+      };
 
-    setDay(next);
-    persist(next);
+      const next: AchieveDay = {
+        ...day,
+        items: [item, ...day.items],
+      };
 
-    setText("");
-    inputRef.current?.focus();
+      setDay(next);
+      persist(next);
+
+      setText("");
+      inputRef.current?.focus();
+    } finally {
+      // 次のtickで解除（Enterリピート/ダブルクリックを吸収）
+      window.setTimeout(() => {
+        addLockRef.current = false;
+      }, 0);
+    }
   }
 
   function toggleDone(id: string) {
@@ -107,7 +122,16 @@ export default function TodayClient() {
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter") addItem();
+    if (e.key !== "Enter") return;
+
+    // IME変換確定中は追加しない（環境差の二重発火対策）
+    if (e.nativeEvent.isComposing) return;
+
+    // キーリピート（長押し）での連続追加を防ぐ
+    if (e.repeat) return;
+
+    e.preventDefault();
+    addItem();
   }
 
   return (
