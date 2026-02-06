@@ -18,24 +18,28 @@ function nowIso(): string {
 }
 
 export default function TodayClient() {
-  // 今日の日付は「この表示セッション中は固定」でOK（MVP）
   const [ymd] = useState<string>(() => formatJstYmd());
   const long = useMemo(() => formatJstLong(), []);
 
-  // 初期描画で localStorage からロード（Client ComponentなのでOK）
   const [day, setDay] = useState<AchieveDay>(() => loadDay(ymd));
   const [text, setText] = useState<string>("");
 
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const saveTimerRef = useRef<number | null>(null);
 
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // ✅ 二重追加防止（Enterリピート / 連打対策）
+  // ✅ 二重追加防止（Cmd/Ctrl+Enterリピート / 連打対策）
   const addLockRef = useRef<boolean>(false);
 
+  // ✅ 編集状態（複数行）
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState<string>("");
+
+  // ✅ 削除確認状態（ワンクリック削除を防ぐ）
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
   useEffect(() => {
-    // unmount時にタイマーだけ掃除（setStateしない）
     return () => {
       if (saveTimerRef.current !== null) {
         window.clearTimeout(saveTimerRef.current);
@@ -72,13 +76,12 @@ export default function TodayClient() {
     const v = text.trim();
     if (!v) return;
 
-    // lock（同一瞬間の二重実行を止める）
     addLockRef.current = true;
 
     try {
       const item: AchieveItem = {
         id: createId(),
-        text: v,
+        text: v, // ✅ 複数行もそのまま保存
         done: false,
         createdAt: nowIso(),
       };
@@ -93,8 +96,9 @@ export default function TodayClient() {
 
       setText("");
       inputRef.current?.focus();
+
+      setConfirmDeleteId(null);
     } finally {
-      // 次のtickで解除（Enterリピート/ダブルクリックを吸収）
       window.setTimeout(() => {
         addLockRef.current = false;
       }, 0);
@@ -109,9 +113,92 @@ export default function TodayClient() {
 
     setDay(next);
     persist(next);
+
+    setConfirmDeleteId(null);
   }
 
-  function removeItem(id: string) {
+  // ✅ Cmd+Enter / Ctrl+Enter で追加（Enter単体は改行）
+  function onTextAreaKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key !== "Enter") return;
+    if (e.nativeEvent.isComposing) return;
+    if (e.repeat) return;
+
+    const isShortcut = e.metaKey || e.ctrlKey;
+    if (!isShortcut) return;
+
+    e.preventDefault();
+    addItem();
+  }
+
+  // ===== 編集（複数行対応）=====
+  function startEdit(item: AchieveItem) {
+    setEditingId(item.id);
+    setEditText(item.text); // ✅ 改行含めてセット
+    setConfirmDeleteId(null);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditText("");
+  }
+
+  function saveEdit() {
+    if (!editingId) return;
+
+    const v = editText.trim();
+    if (!v) return;
+
+    const next: AchieveDay = {
+      ...day,
+      items: day.items.map((i) => (i.id === editingId ? { ...i, text: v } : i)),
+    };
+
+    setDay(next);
+    persist(next);
+
+    setEditingId(null);
+    setEditText("");
+  }
+
+  // ✅ 編集時：Enterは改行、Cmd/Ctrl+Enterで保存、Escでキャンセル
+  function onEditKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      cancelEdit();
+      return;
+    }
+
+    if (e.key !== "Enter") return;
+    if (e.nativeEvent.isComposing) return;
+    if (e.repeat) return;
+
+    const isShortcut = e.metaKey || e.ctrlKey;
+    if (!isShortcut) return;
+
+    e.preventDefault();
+    saveEdit();
+  }
+
+  const editCanSave = editText.trim().length > 0;
+
+  // ===== 削除（確認付き）=====
+  function requestDelete(id: string) {
+    if (editingId && editingId !== id) {
+      cancelEdit();
+    }
+    setConfirmDeleteId((prev) => (prev === id ? null : id));
+  }
+
+  function cancelDelete() {
+    setConfirmDeleteId(null);
+  }
+
+  function deleteItemNow(id: string) {
+    if (editingId === id) {
+      setEditingId(null);
+      setEditText("");
+    }
+
     const next: AchieveDay = {
       ...day,
       items: day.items.filter((i) => i.id !== id),
@@ -119,19 +206,8 @@ export default function TodayClient() {
 
     setDay(next);
     persist(next);
-  }
 
-  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key !== "Enter") return;
-
-    // IME変換確定中は追加しない（環境差の二重発火対策）
-    if (e.nativeEvent.isComposing) return;
-
-    // キーリピート（長押し）での連続追加を防ぐ
-    if (e.repeat) return;
-
-    e.preventDefault();
-    addItem();
+    setConfirmDeleteId(null);
   }
 
   return (
@@ -152,29 +228,42 @@ export default function TodayClient() {
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
         <h2 className="text-sm font-semibold text-zinc-200">追加</h2>
 
-        <div className="mt-3 flex gap-2">
-          <input
+        <div className="mt-3 space-y-2">
+          <textarea
             ref={inputRef}
-            type="text"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder="できたことを1行で（例：洗い物した / 5分歩いた）"
-            className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+            onKeyDown={onTextAreaKeyDown}
+            placeholder={
+              "できたことを複数行でOK（例：\n・洗い物した\n・5分歩いた #健康）"
+            }
+            rows={4}
+            className="w-full resize-y rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
           />
-          <button
-            type="button"
-            onClick={addItem}
-            disabled={!canAdd}
-            className="rounded-xl bg-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-900 disabled:opacity-60"
-          >
-            追加
-          </button>
-        </div>
 
-        <p className="mt-2 text-xs text-zinc-400">
-          ※MVPでは #タグ を本文に書く方式（例：散歩した #健康）
-        </p>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <p className="text-xs text-zinc-400">
+              ショートカット：Macは{" "}
+              <span className="font-semibold">⌘ + Enter</span>、Windowsは{" "}
+              <span className="font-semibold">Ctrl + Enter</span> で追加（Enterは改行）
+            </p>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={addItem}
+                disabled={!canAdd}
+                className="shrink-0 whitespace-nowrap rounded-xl bg-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-900 disabled:opacity-60"
+              >
+                追加
+              </button>
+            </div>
+          </div>
+
+          <p className="text-xs text-zinc-400">
+            ※MVPでは #タグ を本文に書く方式（例：散歩した #健康）
+          </p>
+        </div>
       </section>
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
@@ -191,51 +280,186 @@ export default function TodayClient() {
           </div>
         ) : (
           <ul className="mt-4 space-y-2">
-            {day.items.map((item) => (
-              <li
-                key={item.id}
-                className="flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2"
-              >
-                <label className="mt-0.5 flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={item.done}
-                    onChange={() => toggleDone(item.id)}
-                    className="h-4 w-4 accent-zinc-200"
-                    aria-label="完了"
-                  />
-                </label>
+            {day.items.map((item) => {
+              const isEditing = editingId === item.id;
+              const isConfirmingDelete = confirmDeleteId === item.id;
 
-                <div className="min-w-0 flex-1">
-                  <p
-                    className={
-                      item.done
-                        ? "break-words text-zinc-400 line-through"
-                        : "break-words text-zinc-100"
-                    }
-                  >
-                    {item.text}
-                  </p>
-                  <p className="mt-1 text-xs text-zinc-500">
-                    {new Date(item.createdAt).toLocaleString("ja-JP", {
-                      timeZone: "Asia/Tokyo",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => removeItem(item.id)}
-                  className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
-                  aria-label="削除"
-                  title="削除"
+              return (
+                <li
+                  key={item.id}
+                  className="flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2"
                 >
-                  削除
-                </button>
-              </li>
-            ))}
+                  <label className="mt-0.5 flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={item.done}
+                      onChange={() => toggleDone(item.id)}
+                      className="h-4 w-4 accent-zinc-200"
+                      aria-label="完了"
+                      disabled={isEditing}
+                    />
+                  </label>
+
+                  <div className="min-w-0 flex-1">
+                    {isEditing ? (
+                      <>
+                        <textarea
+                          autoFocus
+                          value={editText}
+                          onChange={(e) => setEditText(e.target.value)}
+                          onKeyDown={onEditKeyDown}
+                          onBlur={saveEdit}
+                          rows={3}
+                          className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+                        />
+
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={saveEdit}
+                            disabled={!editCanSave}
+                            className="rounded-lg bg-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-900 disabled:opacity-60"
+                          >
+                            保存
+                          </button>
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={cancelEdit}
+                            className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900"
+                          >
+                            キャンセル
+                          </button>
+
+                          {isConfirmingDelete ? (
+                            <>
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => deleteItemNow(item.id)}
+                                className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900"
+                              >
+                                本当に削除
+                              </button>
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={cancelDelete}
+                                className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900"
+                              >
+                                やめる
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => requestDelete(item.id)}
+                              className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900"
+                            >
+                              削除
+                            </button>
+                          )}
+
+                          <p className="ml-auto text-xs text-zinc-500">
+                            ⌘/Ctrl+Enter=保存 / Esc=キャンセル（Enterは改行）
+                          </p>
+                        </div>
+
+                        {isConfirmingDelete && (
+                          <p className="mt-2 text-xs text-zinc-500">
+                            ※誤操作防止のため、削除は確認が必要です
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => startEdit(item)}
+                          className="w-full text-left"
+                          aria-label="編集"
+                          title="クリックで編集"
+                        >
+                          <p
+                            className={
+                              item.done
+                                ? "whitespace-pre-wrap break-words text-zinc-400 line-through"
+                                : "whitespace-pre-wrap break-words text-zinc-100"
+                            }
+                          >
+                            {item.text}
+                          </p>
+                        </button>
+
+                        <p className="mt-1 text-xs text-zinc-500">
+                          {new Date(item.createdAt).toLocaleString("ja-JP", {
+                            timeZone: "Asia/Tokyo",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </p>
+
+                        {isConfirmingDelete && (
+                          <p className="mt-2 text-xs text-zinc-500">
+                            ※「本当に削除」を押した場合のみ削除されます
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {isEditing ? null : (
+                    <div className="flex flex-col gap-2">
+                      {isConfirmingDelete ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => deleteItemNow(item.id)}
+                            className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+                            aria-label="本当に削除"
+                            title="本当に削除"
+                          >
+                            本当に削除
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelDelete}
+                            className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+                            aria-label="やめる"
+                            title="やめる"
+                          >
+                            やめる
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => startEdit(item)}
+                            className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+                            aria-label="編集"
+                            title="編集"
+                          >
+                            編集
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => requestDelete(item.id)}
+                            className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+                            aria-label="削除"
+                            title="削除"
+                          >
+                            削除
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

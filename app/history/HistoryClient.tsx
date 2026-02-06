@@ -1,21 +1,20 @@
 /* app/history/HistoryClient.tsx */
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useEffect } from "react";
 import { formatJstLong, formatJstYmd } from "@/lib/jst";
 import { listDays, type AchieveDay } from "@/lib/storage";
 
 type Period = "all" | "week" | "month";
 
 function ymdToDateJst(ymd: string): Date {
-  // "YYYY-MM-DD" -> JST固定のDateとして扱う
   return new Date(`${ymd}T00:00:00+09:00`);
 }
 
 function withinLastDays(ymd: string, days: number): boolean {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - (days - 1)); // 7日なら「今日含めて7日」
+  start.setDate(start.getDate() - (days - 1));
   const d = ymdToDateJst(ymd);
   return d.getTime() >= start.getTime();
 }
@@ -42,11 +41,43 @@ export default function HistoryClient() {
   const todayYmd = useMemo(() => formatJstYmd(), []);
   const todayLong = useMemo(() => formatJstLong(), []);
 
-  // 初回レンダーで localStorage を読む（effect不要）
-  const [days] = useState<AchieveDay[]>(() => listDays());
+  const [days, setDays] = useState<AchieveDay[]>(() => listDays());
   const [query, setQuery] = useState<string>("");
   const [period, setPeriod] = useState<Period>("all");
   const [expandedYmd, setExpandedYmd] = useState<string | null>(null);
+
+  const refreshDays = useCallback(() => {
+    const next = listDays();
+    setDays(next);
+    setExpandedYmd((prev) => {
+      if (!prev) return null;
+      return next.some((d) => d.ymd === prev) ? prev : null;
+    });
+  }, []);
+
+  // ✅ フォーカス復帰 / タブ再表示 / 別タブ更新（storage）で自動更新
+  useEffect(() => {
+    const onFocus = () => refreshDays();
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshDays();
+    };
+
+    const onStorage = () => {
+      // 別タブで更新された場合も拾う（キー判定しない：シンプルに全更新）
+      refreshDays();
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("storage", onStorage);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [refreshDays]);
 
   const filtered = useMemo(() => {
     const q = query.trim();
@@ -71,11 +102,23 @@ export default function HistoryClient() {
     <section className="space-y-6">
       <header className="space-y-2">
         <p className="text-sm text-zinc-400">{todayYmd}</p>
-        <h1 className="text-2xl font-semibold tracking-tight">履歴</h1>
-        <p className="text-zinc-300">
-          過去の「できたこと」を検索・見返せます。
-        </p>
-        <p className="text-sm text-zinc-400">{todayLong}</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">履歴</h1>
+            <p className="text-zinc-300">
+              過去の「できたこと」を検索・見返せます。
+            </p>
+            <p className="mt-1 text-sm text-zinc-400">{todayLong}</p>
+          </div>
+
+          <button
+            type="button"
+            onClick={refreshDays}
+            className="shrink-0 rounded-xl border border-zinc-800 px-4 py-2 text-sm text-zinc-200 hover:bg-zinc-900"
+          >
+            更新
+          </button>
+        </div>
       </header>
 
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
