@@ -7,6 +7,27 @@ export type DayEntry = {
   storageKey: string;
 };
 
+export type TagAliases = Record<string, string>;
+
+export const TAG_ALIASES_KEY = "achieve:tag-aliases:v1";
+
+/**
+ * 初期の表記ゆれ辞書（必要に応じて増やす）
+ * - key: エイリアス（正規化後：NFKC+trim+lower、#除去済みで想定）
+ * - value: 統一したいタグ名（表示にも使われる）
+ */
+export const DEFAULT_TAG_ALIASES: TagAliases = {
+  // ひらがな → 漢字/用語
+  けんこう: "健康",
+  べんきょう: "学習",
+  じむ: "事務",
+
+  // 英語 → 日本語
+  health: "健康",
+  study: "学習",
+  work: "仕事",
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -65,37 +86,66 @@ export function scanDaysFromStorage(storage: Storage): DayEntry[] {
   return Array.from(map.values()).sort((a, b) => b.ymd.localeCompare(a.ymd));
 }
 
-/**
- * タグの表記ゆれ辞書（必要に応じて追加）
- * - key: 正規化後のタグ（小文字/全角半角統一済み、#除去済み）
- * - value: 採用したい正規タグ（表示にも使われます）
- */
-const TAG_ALIASES: Record<string, string> = {
-  // 例：ひらがな → 漢字へ統一
-  けんこう: "健康",
-  べんきょう: "学習",
-  じむ: "事務",
+export function normalizeAliasKey(raw: string): string {
+  let q = raw.normalize("NFKC").trim();
+  if (q.startsWith("#")) q = q.slice(1);
 
-  // 例：英語 → 日本語へ統一
-  health: "健康",
-  study: "学習",
-  work: "仕事",
-};
+  q = q.replace(/^[\(\[【「『（]+/g, "");
+  q = q.replace(/[\)\]\}】」』）、。．.,!?:;！？]+$/g, "");
 
-function normalizeTagKey(raw: string): string {
-  // 全角半角統一 → trim → 英字は小文字化
-  return raw.normalize("NFKC").trim().toLowerCase();
+  return q.trim().toLowerCase();
 }
 
-function normalizeTagValue(raw: string): string {
-  // 表示用（必要ならここでさらに整形）
+export function normalizeAliasValue(raw: string): string {
   return raw.normalize("NFKC").trim();
 }
 
-export function canonicalizeTag(raw: string): string {
-  const k = normalizeTagKey(raw);
-  const aliased = TAG_ALIASES[k];
-  return aliased ? normalizeTagValue(aliased) : k;
+export function loadTagAliases(storage: Storage): TagAliases {
+  const raw = storage.getItem(TAG_ALIASES_KEY);
+  if (!raw) return { ...DEFAULT_TAG_ALIASES };
+
+  try {
+    const parsed: unknown = JSON.parse(raw) as unknown;
+    if (!isRecord(parsed)) return { ...DEFAULT_TAG_ALIASES };
+
+    const out: TagAliases = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof k !== "string" || typeof v !== "string") continue;
+      const nk = normalizeAliasKey(k);
+      const nv = normalizeAliasValue(v);
+      if (!nk || !nv) continue;
+      out[nk] = nv;
+    }
+
+    // 保存データが空ならデフォルトに戻す
+    if (Object.keys(out).length === 0) return { ...DEFAULT_TAG_ALIASES };
+
+    return out;
+  } catch {
+    return { ...DEFAULT_TAG_ALIASES };
+  }
+}
+
+export function saveTagAliases(storage: Storage, aliases: TagAliases): void {
+  storage.setItem(TAG_ALIASES_KEY, JSON.stringify(aliases));
+}
+
+export function resetTagAliases(storage: Storage): TagAliases {
+  const next = { ...DEFAULT_TAG_ALIASES };
+  saveTagAliases(storage, next);
+  return next;
+}
+
+/**
+ * 生タグを辞書で正規化して返す
+ * - aliasesに完全一致する場合は value を採用
+ * - それ以外は key 正規化（lower）した文字列を返す
+ */
+export function canonicalizeTag(raw: string, aliases: TagAliases): string {
+  const k = normalizeAliasKey(raw);
+  if (!k) return "";
+  const aliased = aliases[k];
+  return aliased ? normalizeAliasValue(aliased) : k;
 }
 
 /**
@@ -104,7 +154,7 @@ export function canonicalizeTag(raw: string): string {
  * - 1アイテム内で同じタグが複数回出ても1回として扱う
  * - 表記ゆれ辞書で正規化して返す
  */
-export function extractTags(text: string): string[] {
+export function extractTags(text: string, aliases: TagAliases): string[] {
   const set = new Set<string>();
   const re = /#([^\s#]+)/g;
 
@@ -112,11 +162,10 @@ export function extractTags(text: string): string[] {
   while ((m = re.exec(text)) !== null) {
     let tag = m[1] ?? "";
 
-    // 前後の括弧/記号をざっくり除去
     tag = tag.replace(/^[\(\[【「『（]+/g, "");
     tag = tag.replace(/[\)\]\}】」』）、。．.,!?:;！？]+$/g, "");
 
-    const canon = canonicalizeTag(tag);
+    const canon = canonicalizeTag(tag, aliases);
     if (!canon) continue;
 
     set.add(canon);
