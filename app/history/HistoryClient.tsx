@@ -1,19 +1,18 @@
 /* app/history/HistoryClient.tsx */
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   canonicalizeTag,
   extractTags,
   includesQuery,
-  loadTagAliases,
   normalizeAliasKey,
   type TagAliases,
 } from "@/lib/diary";
 import { type AchieveItem, type DayEntry } from "@/lib/storage";
-import { runIdle, type CancelFn } from "@/lib/client-scheduler";
 import { useDaysData } from "@/lib/useDaysData";
+import { useTagAliases } from "@/lib/useTagAliases";
 
 type SearchMode = "text" | "tag";
 
@@ -50,43 +49,36 @@ export default function HistoryClient() {
   const mode: SearchMode = searchParams.get("mode") === "tag" ? "tag" : "text";
   const q = searchParams.get("q") ?? "";
 
-  const [aliases, setAliases] = useState<TagAliases>(() => {
-    if (typeof window === "undefined") return {};
-    return loadTagAliases(window.localStorage);
-  });
-
-  // aliases も idle で更新（effect内の同期setStateを避ける）
-  const aliasesJobCancelRef = useRef<CancelFn | null>(null);
-
-  const requestAliasesRefresh = useCallback(() => {
-    if (typeof window === "undefined") return;
-    if (aliasesJobCancelRef.current) return;
-
-    aliasesJobCancelRef.current = runIdle(() => {
-      aliasesJobCancelRef.current = null;
-      setAliases(loadTagAliases(window.localStorage));
-    });
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (aliasesJobCancelRef.current) aliasesJobCancelRef.current();
-      aliasesJobCancelRef.current = null;
-    };
-  }, []);
-
-  const { entries, isLoading, requestRefresh } = useDaysData({
+  const {
+    aliases,
+    isLoading: isAliasesLoading,
+    requestRefresh: requestAliasesRefresh,
+  } = useTagAliases({
     enabled: true,
     refreshOnMount: true,
     refreshOnFocus: true,
     refreshOnVisible: true,
     throttleMs: 500,
-    onRefreshRequested: requestAliasesRefresh,
+  });
+
+  const aliasesObj = useMemo(() => aliases ?? {}, [aliases]);
+
+  const {
+    entries,
+    isLoading: isDaysLoading,
+    requestRefresh: requestDaysRefresh,
+  } = useDaysData({
+    enabled: true,
+    refreshOnMount: true,
+    refreshOnFocus: true,
+    refreshOnVisible: true,
+    throttleMs: 500,
+    onRefreshRequested: () => requestAliasesRefresh(),
   });
 
   const listEntries: DayEntry[] = useMemo(() => entries ?? [], [entries]);
 
-  const tagQ = useMemo(() => tagQueryCanonical(q, aliases), [q, aliases]);
+  const tagQ = useMemo(() => tagQueryCanonical(q, aliasesObj), [q, aliasesObj]);
 
   const filteredEntries = useMemo(() => {
     const tq = q.trim();
@@ -94,14 +86,14 @@ export default function HistoryClient() {
 
     if (mode === "tag") {
       if (!tagQ) return listEntries;
-      return listEntries.filter((e) => e.day.items.some((it) => itemMatchesTag(it, tagQ, aliases)));
+      return listEntries.filter((e) => e.day.items.some((it) => itemMatchesTag(it, tagQ, aliasesObj)));
     }
 
     return listEntries.filter((e) => {
       if (includesQuery(e.ymd, tq)) return true;
       return e.day.items.some((it) => itemMatchesText(it, tq));
     });
-  }, [listEntries, q, mode, tagQ, aliases]);
+  }, [listEntries, q, mode, tagQ, aliasesObj]);
 
   const [selectedYmd, setSelectedYmd] = useState<string | null>(null);
 
@@ -124,11 +116,11 @@ export default function HistoryClient() {
 
     if (mode === "tag") {
       if (!tagQ) return selected.day.items;
-      return selected.day.items.filter((it) => itemMatchesTag(it, tagQ, aliases));
+      return selected.day.items.filter((it) => itemMatchesTag(it, tagQ, aliasesObj));
     }
 
     return selected.day.items.filter((it) => itemMatchesText(it, tq));
-  }, [selected, q, mode, tagQ, aliases]);
+  }, [selected, q, mode, tagQ, aliasesObj]);
 
   function setQueryToUrl(next: string) {
     router.replace(buildUrl(pathname, next, mode));
@@ -149,13 +141,13 @@ export default function HistoryClient() {
     const count = new Map<string, number>();
     for (const e of listEntries) {
       for (const it of e.day.items) {
-        const tags = extractTags(it.text, aliases);
+        const tags = extractTags(it.text, aliasesObj);
         for (const t of tags) count.set(t, (count.get(t) ?? 0) + 1);
       }
     }
 
     const inv = new Map<string, string[]>();
-    for (const [k, v] of Object.entries(aliases)) {
+    for (const [k, v] of Object.entries(aliasesObj)) {
       const canon = v.trim();
       if (!canon) continue;
       const arr = inv.get(canon) ?? [];
@@ -181,7 +173,13 @@ export default function HistoryClient() {
     });
 
     return filtered.slice(0, 8);
-  }, [listEntries, aliases, q, mode, showSuggest]);
+  }, [listEntries, aliasesObj, q, mode, showSuggest]);
+
+  const isLoading = useMemo(() => {
+    if (isDaysLoading) return true;
+    if (mode === "tag" && isAliasesLoading) return true;
+    return false;
+  }, [isDaysLoading, isAliasesLoading, mode]);
 
   const totalDaysText = useMemo(() => {
     if (isLoading) return "読み込み中…";
@@ -200,8 +198,8 @@ export default function HistoryClient() {
         <button
           type="button"
           onClick={() => {
-            requestRefresh();
-            requestAliasesRefresh();
+            requestDaysRefresh({ force: true, immediate: true });
+            requestAliasesRefresh({ force: true, immediate: true });
           }}
           className="shrink-0 whitespace-nowrap rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900"
         >

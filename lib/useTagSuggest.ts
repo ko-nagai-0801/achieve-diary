@@ -2,14 +2,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { loadTagAliases, normalizeAliasKey, type TagAliases } from "@/lib/diary";
+import { normalizeAliasKey } from "@/lib/diary";
 import { runIdle, type CancelFn } from "@/lib/client-scheduler";
 import { useDaysData } from "@/lib/useDaysData";
-import { loadBool, saveBool } from "@/lib/prefs/bool";
+import { useTagAliases } from "@/lib/useTagAliases";
 import { getActiveTagToken, type ActiveTagToken } from "@/lib/tags/active-token";
 import { buildTagSuggestions, type TagSuggestion } from "@/lib/tags/suggest";
-
-const TAG_SUGGEST_SPACE_KEY = "achieve:tag-suggest:space:v1";
 
 type UseTagSuggestArgs = {
   text: string;
@@ -37,8 +35,18 @@ type UseTagSuggestResult = {
   refresh: () => void;
 };
 
-function canUseStorage(): boolean {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+function getAliasesSig(aliases: Record<string, string>): string {
+  const keys = Object.keys(aliases);
+  const len = keys.length;
+  if (len === 0) return "0:..:..";
+
+  let min = keys[0] ?? "";
+  let max = keys[0] ?? "";
+  for (const k of keys) {
+    if (k < min) min = k;
+    if (k > max) max = k;
+  }
+  return `${len}:${min}:${max}`;
 }
 
 export function useTagSuggest(args: UseTagSuggestArgs): UseTagSuggestResult {
@@ -47,8 +55,8 @@ export function useTagSuggest(args: UseTagSuggestArgs): UseTagSuggestResult {
   const activeTag = useMemo(() => getActiveTagToken(text, cursor), [text, cursor]);
   const shouldShowSuggest = focused && suggestEnabled && activeTag !== null;
 
-  // days は「候補UIが開いてる時だけ」読み込む（A）
-  const { entries, isLoading, requestRefresh } = useDaysData({
+  // A: 候補UIが開いてる時だけ読む
+  const { entries, isLoading: isDaysLoading, requestRefresh: requestDaysRefresh } = useDaysData({
     enabled: shouldShowSuggest,
     refreshOnMount: true,
     refreshOnFocus: true,
@@ -56,51 +64,39 @@ export function useTagSuggest(args: UseTagSuggestArgs): UseTagSuggestResult {
     throttleMs: 500,
   });
 
-  // aliases も必要時だけ取り扱う（A）
-  const [aliases, setAliases] = useState<TagAliases>(() => {
-    if (!canUseStorage()) return {};
-    return loadTagAliases(window.localStorage);
+  const {
+    aliases: aliasesRaw,
+    isLoading: isAliasesLoading,
+    requestRefresh: requestAliasesRefresh,
+  } = useTagAliases({
+    enabled: shouldShowSuggest,
+    refreshOnMount: true,
+    refreshOnFocus: true,
+    refreshOnVisible: true,
+    throttleMs: 500,
   });
 
-  const [aliasesVersion, setAliasesVersion] = useState<number>(0);
-  const aliasesJobCancelRef = useRef<CancelFn | null>(null);
+  const aliases = useMemo(() => aliasesRaw ?? {}, [aliasesRaw]);
 
-  const requestAliasesRefresh = useCallback(() => {
-    if (!canUseStorage()) return;
-    if (aliasesJobCancelRef.current) return;
+  // autoSpace は useTagSuggest 内で保持（既存挙動維持）
+  const TAG_SUGGEST_SPACE_KEY = "achieve:tag-suggest:space:v1";
 
-    aliasesJobCancelRef.current = runIdle(() => {
-      aliasesJobCancelRef.current = null;
-      setAliases(loadTagAliases(window.localStorage));
-      setAliasesVersion((v) => v + 1);
-    });
-  }, []);
-
-  // shouldShowSuggest が true になったタイミングで、idleで aliases を再読込（B）
-  useEffect(() => {
-    if (!shouldShowSuggest) return;
-
-    requestAliasesRefresh();
-
-    return () => {
-      if (aliasesJobCancelRef.current) aliasesJobCancelRef.current();
-      aliasesJobCancelRef.current = null;
-    };
-  }, [shouldShowSuggest, requestAliasesRefresh]);
-
-  // autoSpace preference
   const [autoSpace, setAutoSpace] = useState<boolean>(() => {
-    if (!canUseStorage()) return true;
-    return loadBool(window.localStorage, TAG_SUGGEST_SPACE_KEY, true);
+    if (typeof window === "undefined") return true;
+    const raw = window.localStorage.getItem(TAG_SUGGEST_SPACE_KEY);
+    if (!raw) return true;
+    if (raw === "1") return true;
+    if (raw === "0") return false;
+    return true;
   });
 
   const toggleAutoSpace = useCallback((next: boolean) => {
     setAutoSpace(next);
-    if (!canUseStorage()) return;
-    saveBool(window.localStorage, TAG_SUGGEST_SPACE_KEY, next);
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(TAG_SUGGEST_SPACE_KEY, next ? "1" : "0");
   }, []);
 
-  // heavy suggestion compute (B) with key tracking (no setState in effect body)
+  // heavy compute in idle
   const [allSuggestions, setAllSuggestions] = useState<TagSuggestion[]>([]);
   const [computedKey, setComputedKey] = useState<string>("");
   const suggestJobCancelRef = useRef<CancelFn | null>(null);
@@ -111,16 +107,16 @@ export function useTagSuggest(args: UseTagSuggestArgs): UseTagSuggestResult {
     return `${entries.length}:${top}`;
   }, [entries]);
 
-  const wantKey = useMemo(() => {
-    // shouldShowSuggest の時だけ意味があるキー
-    return `${entriesSig}:${aliasesVersion}`;
-  }, [entriesSig, aliasesVersion]);
+  const aliasesSig = useMemo(() => getAliasesSig(aliases), [aliases]);
+
+  const wantKey = useMemo(() => `${entriesSig}:${aliasesSig}`, [entriesSig, aliasesSig]);
 
   useEffect(() => {
     if (!shouldShowSuggest) return;
     if (!entries) return;
 
     if (suggestJobCancelRef.current) suggestJobCancelRef.current();
+
     suggestJobCancelRef.current = runIdle(() => {
       suggestJobCancelRef.current = null;
       const built = buildTagSuggestions(entries, aliases);
@@ -136,10 +132,10 @@ export function useTagSuggest(args: UseTagSuggestArgs): UseTagSuggestResult {
 
   const isComputing = useMemo(() => {
     if (!shouldShowSuggest) return false;
-    if (isLoading) return true;
+    if (isDaysLoading || isAliasesLoading) return true;
     if (!entries) return true;
     return computedKey !== wantKey;
-  }, [shouldShowSuggest, isLoading, entries, computedKey, wantKey]);
+  }, [shouldShowSuggest, isDaysLoading, isAliasesLoading, entries, computedKey, wantKey]);
 
   const suggestions = useMemo(() => {
     if (!shouldShowSuggest) return [];
@@ -192,11 +188,9 @@ export function useTagSuggest(args: UseTagSuggestArgs): UseTagSuggestResult {
   );
 
   const refresh = useCallback(() => {
-    requestRefresh({ force: true });
-    requestAliasesRefresh();
-
-    // 計算結果は次の idle 計算で更新される
-  }, [requestRefresh, requestAliasesRefresh]);
+    requestDaysRefresh({ force: true });
+    requestAliasesRefresh({ force: true });
+  }, [requestDaysRefresh, requestAliasesRefresh]);
 
   return {
     activeTag,

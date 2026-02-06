@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { runIdle, type CancelFn } from "@/lib/client-scheduler";
 import { useDaysData } from "@/lib/useDaysData";
 import type { DayEntry } from "@/lib/storage";
+import TagAliasesEditor from "@/components/insights/TagAliasesEditor";
 
 type Insights = {
   totalDays: number;
@@ -83,7 +84,6 @@ export default function InsightsClient() {
   const isComputing = useMemo(() => {
     if (isLoading) return true;
     if (!entries) return true;
-    // entriesがあるのに totalDays が一致してない間は「集計中」扱い
     return insights.totalDays !== entries.length;
   }, [isLoading, entries, insights.totalDays]);
 
@@ -138,6 +138,9 @@ export default function InsightsClient() {
           </ul>
         )}
       </div>
+
+      {/* ✅ 辞書編集：保存後に notifyTagAliasesMutated() を呼ぶことで同一タブ即反映 */}
+      <TagAliasesEditor />
     </section>
   );
 }
