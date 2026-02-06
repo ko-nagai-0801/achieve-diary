@@ -454,320 +454,328 @@ export default function TodayClient() {
   }
 
   return (
-    <section className="space-y-6">
-      <header className="space-y-2">
-        <p className="text-sm text-zinc-400">{ymd}</p>
-        <h1 className="text-2xl font-semibold tracking-tight">今日できたこと</h1>
-        <p className="text-zinc-300">小さくてもOK。「できた」を集めましょう。</p>
+    <main className="w-full p-4 md:p-6">
+      <section className="space-y-6">
+        <header className="space-y-2">
+          <p className="text-sm text-zinc-400">{ymd}</p>
+          <h1 className="text-2xl font-semibold tracking-tight">今日できたこと</h1>
+          <p className="text-zinc-300">小さくてもOK。「できた」を集めましょう。</p>
 
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-zinc-400">{long}</p>
-          <p className="text-xs text-zinc-500">自動保存 {saveState === "saved" ? "✓" : ""}</p>
-        </div>
-      </header>
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-zinc-400">{long}</p>
+            <p className="text-xs text-zinc-500">自動保存 {saveState === "saved" ? "✓" : ""}</p>
+          </div>
+        </header>
 
-      <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-        <h2 className="text-sm font-semibold text-zinc-200">追加</h2>
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+          <h2 className="text-sm font-semibold text-zinc-200">追加</h2>
 
-        <div className="mt-3 space-y-2">
-          <div className="relative">
-            <textarea
-              ref={inputRef}
-              value={text}
-              onChange={(e) => {
-                const v = e.target.value;
-                setText(v);
-                caretRef.current = e.target.selectionStart ?? v.length;
-                setSuggestEnabled(true);
-              }}
-              onKeyDown={(e) => {
-                const el = e.currentTarget;
-                caretRef.current = el.selectionStart ?? el.value.length;
-                setSuggestEnabled(true);
-                onAddKeyDown(e);
-              }}
-              onClick={(e) => {
-                const el = e.currentTarget;
-                caretRef.current = el.selectionStart ?? el.value.length;
-                setSuggestEnabled(true);
-              }}
-              onKeyUp={(e) => {
-                const el = e.currentTarget;
-                caretRef.current = el.selectionStart ?? el.value.length;
-              }}
-              onFocus={() => {
-                setFocused(true);
-                setSuggestEnabled(true);
-                refreshTagData();
-              }}
-              onBlur={() => setFocused(false)}
-              placeholder={"できたことを複数行でOK（例：\n・洗い物した\n・5分歩いた #健康）"}
-              rows={4}
-              className="w-full resize-y rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
-            />
+          <div className="mt-3 space-y-2">
+            <div className="relative">
+              <textarea
+                ref={inputRef}
+                value={text}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setText(v);
+                  caretRef.current = e.target.selectionStart ?? v.length;
+                  setSuggestEnabled(true);
+                }}
+                onKeyDown={(e) => {
+                  const el = e.currentTarget;
+                  caretRef.current = el.selectionStart ?? el.value.length;
+                  setSuggestEnabled(true);
+                  onAddKeyDown(e);
+                }}
+                onClick={(e) => {
+                  const el = e.currentTarget;
+                  caretRef.current = el.selectionStart ?? el.value.length;
+                  setSuggestEnabled(true);
+                }}
+                onKeyUp={(e) => {
+                  const el = e.currentTarget;
+                  caretRef.current = el.selectionStart ?? el.value.length;
+                }}
+                onFocus={() => {
+                  setFocused(true);
+                  setSuggestEnabled(true);
+                  refreshTagData();
+                }}
+                onBlur={() => setFocused(false)}
+                placeholder={"できたことを複数行でOK（例：\n・洗い物した\n・5分歩いた #健康）"}
+                rows={4}
+                className="w-full resize-y rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+              />
 
-            {shouldShowSuggest && filteredSuggestions.length > 0 ? (
-              <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 rounded-xl border border-zinc-800 bg-zinc-950/95 p-2 shadow-lg">
-                <div className="flex items-center justify-between px-2 pb-1">
-                  <div>
-                    <p className="text-xs text-zinc-500">タグ候補（直近7日優先）</p>
-                    <p className="text-[11px] text-zinc-500">
-                      ヒント：<span className="font-semibold">#</span>の後に入力すると絞り込み
-                    </p>
+              {shouldShowSuggest && filteredSuggestions.length > 0 ? (
+                <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 rounded-xl border border-zinc-800 bg-zinc-950/95 p-2 shadow-lg">
+                  <div className="flex items-center justify-between px-2 pb-1">
+                    <div>
+                      <p className="text-xs text-zinc-500">タグ候補（直近7日優先）</p>
+                      <p className="text-[11px] text-zinc-500">
+                        ヒント：<span className="font-semibold">#</span>の後に入力すると絞り込み
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => refreshTagData()}
+                      className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-900"
+                    >
+                      更新
+                    </button>
                   </div>
 
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => refreshTagData()}
-                    className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-900"
-                  >
-                    更新
-                  </button>
+                  <ul className="flex flex-wrap gap-2 px-2 pb-1">
+                    {filteredSuggestions.map((s) => (
+                      <li key={s.tag}>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => insertTag(s.tag)}
+                          className="rounded-full border border-zinc-800 bg-zinc-950/40 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-900"
+                          title="挿入"
+                        >
+                          <span>#{s.tag}</span>{" "}
+                          <span className="text-xs text-zinc-400">
+                            7日×{s.recent7Count} / 全体×{s.totalCount}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <div className="flex items-center justify-between gap-2 px-2 pt-1">
+                    <label className="flex items-center gap-2 text-xs text-zinc-200">
+                      <input
+                        type="checkbox"
+                        checked={autoSpace}
+                        onChange={(e) => toggleAutoSpace(e.target.checked)}
+                        className="h-4 w-4 accent-zinc-200"
+                      />
+                      候補クリック後に半角スペースを自動挿入
+                    </label>
+
+                    <span className="text-[11px] text-zinc-500">ON/OFFは保存されます</span>
+                  </div>
                 </div>
-
-                <ul className="flex flex-wrap gap-2 px-2 pb-1">
-                  {filteredSuggestions.map((s) => (
-                    <li key={s.tag}>
-                      <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => insertTag(s.tag)}
-                        className="rounded-full border border-zinc-800 bg-zinc-950/40 px-3 py-1.5 text-sm text-zinc-100 hover:bg-zinc-900"
-                        title="挿入"
-                      >
-                        <span>#{s.tag}</span>{" "}
-                        <span className="text-xs text-zinc-400">
-                          7日×{s.recent7Count} / 全体×{s.totalCount}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-
-                <div className="flex items-center justify-between gap-2 px-2 pt-1">
-                  <label className="flex items-center gap-2 text-xs text-zinc-200">
-                    <input
-                      type="checkbox"
-                      checked={autoSpace}
-                      onChange={(e) => toggleAutoSpace(e.target.checked)}
-                      className="h-4 w-4 accent-zinc-200"
-                    />
-                    候補クリック後に半角スペースを自動挿入
-                  </label>
-
-                  <span className="text-[11px] text-zinc-500">ON/OFFは保存されます</span>
-                </div>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <p className="text-xs text-zinc-400">
-              追加：Macは <span className="font-semibold">⌘ + Enter</span>、Windowsは{" "}
-              <span className="font-semibold">Ctrl + Enter</span>（Enterは改行）
-            </p>
-
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={addItem}
-                disabled={!canAdd}
-                className="shrink-0 whitespace-nowrap rounded-xl bg-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-900 disabled:opacity-60"
-              >
-                追加
-              </button>
+              ) : null}
             </div>
+
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <p className="text-xs text-zinc-400">
+                追加：Macは <span className="font-semibold">⌘ + Enter</span>、Windowsは{" "}
+                <span className="font-semibold">Ctrl + Enter</span>（Enterは改行）
+              </p>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={addItem}
+                  disabled={!canAdd}
+                  className="shrink-0 whitespace-nowrap rounded-xl bg-zinc-200 px-4 py-2 text-sm font-semibold text-zinc-900 disabled:opacity-60"
+                >
+                  追加
+                </button>
+              </div>
+            </div>
+
+            <p className="text-xs text-zinc-400">※MVPでは #タグ を本文に書く方式（例：散歩した #健康）</p>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-zinc-200">今日のリスト</h2>
+            <p className="text-xs text-zinc-400">合計：{totalCount}件</p>
           </div>
 
-          <p className="text-xs text-zinc-400">※MVPでは #タグ を本文に書く方式（例：散歩した #健康）</p>
-        </div>
-      </section>
+          {day.items.length === 0 ? (
+            <div className="mt-4 rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-400">
+              まだ何もありません。最初の1件を追加してみましょう。
+            </div>
+          ) : (
+            <ul className="mt-4 space-y-2">
+              {day.items.map((item) => {
+                const isEditing = editingId === item.id;
+                const isConfirmingDelete = confirmDeleteId === item.id;
 
-      <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-zinc-200">今日のリスト</h2>
-          <p className="text-xs text-zinc-400">合計：{totalCount}件</p>
-        </div>
+                return (
+                  <li key={item.id} className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2">
+                    <div className="flex items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        {isEditing ? (
+                          <>
+                            <textarea
+                              autoFocus
+                              value={editText}
+                              onChange={(e) => setEditText(e.target.value)}
+                              onKeyDown={onEditKeyDown}
+                              rows={3}
+                              className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+                            />
 
-        {day.items.length === 0 ? (
-          <div className="mt-4 rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-400">
-            まだ何もありません。最初の1件を追加してみましょう。
-          </div>
-        ) : (
-          <ul className="mt-4 space-y-2">
-            {day.items.map((item) => {
-              const isEditing = editingId === item.id;
-              const isConfirmingDelete = confirmDeleteId === item.id;
-
-              return (
-                <li key={item.id} className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2">
-                  <div className="flex items-start gap-3">
-                    <div className="min-w-0 flex-1">
-                      {isEditing ? (
-                        <>
-                          <textarea
-                            autoFocus
-                            value={editText}
-                            onChange={(e) => setEditText(e.target.value)}
-                            onKeyDown={onEditKeyDown}
-                            rows={3}
-                            className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
-                          />
-
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={saveEdit}
-                              disabled={!editCanSave}
-                              className="rounded-lg bg-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-900 disabled:opacity-60"
-                            >
-                              保存
-                            </button>
-                            <button
-                              type="button"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={cancelEdit}
-                              className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900"
-                            >
-                              キャンセル
-                            </button>
-
-                            {isConfirmingDelete ? (
-                              <>
-                                <button
-                                  type="button"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => deleteItemNow(item.id)}
-                                  className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900"
-                                >
-                                  本当に削除
-                                </button>
-                                <button
-                                  type="button"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={cancelDelete}
-                                  className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900"
-                                >
-                                  やめる
-                                </button>
-                              </>
-                            ) : (
+                            <div className="mt-2 flex flex-wrap gap-2">
                               <button
                                 type="button"
                                 onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => requestDelete(item.id)}
+                                onClick={saveEdit}
+                                disabled={!editCanSave}
+                                className="rounded-lg bg-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-900 disabled:opacity-60"
+                              >
+                                保存
+                              </button>
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={cancelEdit}
                                 className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900"
                               >
-                                削除
+                                キャンセル
                               </button>
-                            )}
 
-                            <p className="ml-auto text-xs text-zinc-500">⌘/Ctrl+Enter=保存 / Esc=キャンセル（Enterは改行）</p>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <button type="button" onClick={() => startEdit(item)} className="w-full text-left" aria-label="編集" title="クリックで編集">
-                            <p className="whitespace-pre-wrap break-words text-zinc-100">{item.text}</p>
-                          </button>
+                              {isConfirmingDelete ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => deleteItemNow(item.id)}
+                                    className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900"
+                                  >
+                                    本当に削除
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={cancelDelete}
+                                    className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900"
+                                  >
+                                    やめる
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => requestDelete(item.id)}
+                                  className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-200 hover:bg-zinc-900"
+                                >
+                                  削除
+                                </button>
+                              )}
 
-                          <p className="mt-1 text-xs text-zinc-500">
-                            {new Date(item.createdAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" })}
-                          </p>
-                        </>
-                      )}
-                    </div>
-
-                    {isEditing ? null : (
-                      <div className="flex flex-col gap-2">
-                        {isConfirmingDelete ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => deleteItemNow(item.id)}
-                              className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
-                            >
-                              本当に削除
-                            </button>
-                            <button
-                              type="button"
-                              onClick={cancelDelete}
-                              className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
-                            >
-                              やめる
-                            </button>
+                              <p className="ml-auto text-xs text-zinc-500">⌘/Ctrl+Enter=保存 / Esc=キャンセル（Enterは改行）</p>
+                            </div>
                           </>
                         ) : (
                           <>
                             <button
                               type="button"
                               onClick={() => startEdit(item)}
-                              className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+                              className="w-full text-left"
+                              aria-label="編集"
+                              title="クリックで編集"
                             >
-                              編集
+                              <p className="whitespace-pre-wrap break-words text-zinc-100">{item.text}</p>
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => requestDelete(item.id)}
-                              className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
-                            >
-                              削除
-                            </button>
+
+                            <p className="mt-1 text-xs text-zinc-500">
+                              {new Date(item.createdAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" })}
+                            </p>
                           </>
                         )}
                       </div>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
 
-      <section className="grid gap-3 md:grid-cols-2">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-          <h2 className="text-sm font-semibold text-zinc-200">気分（任意）</h2>
+                      {isEditing ? null : (
+                        <div className="flex flex-col gap-2">
+                          {isConfirmingDelete ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => deleteItemNow(item.id)}
+                                className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+                              >
+                                本当に削除
+                              </button>
+                              <button
+                                type="button"
+                                onClick={cancelDelete}
+                                className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+                              >
+                                やめる
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => startEdit(item)}
+                                className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+                              >
+                                編集
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => requestDelete(item.id)}
+                                className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+                              >
+                                削除
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
 
-          <div className="mt-3 flex flex-wrap gap-2">
-            {(["good", "neutral", "tough"] as const).map((m) => {
-              const selected = day.mood === m;
-              return (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMood(m)}
-                  className={[
-                    "rounded-xl border px-3 py-2 text-sm",
-                    selected ? "border-zinc-200 bg-zinc-200 text-zinc-900" : "border-zinc-800 text-zinc-200 hover:bg-zinc-900",
-                  ].join(" ")}
-                  aria-pressed={selected}
-                  title={selected ? "もう一度押すと解除" : "選択"}
-                >
-                  {moodLabel(m)}
-                </button>
-              );
-            })}
+        <section className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <h2 className="text-sm font-semibold text-zinc-200">気分（任意）</h2>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(["good", "neutral", "tough"] as const).map((m) => {
+                const selected = day.mood === m;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMood(m)}
+                    className={[
+                      "rounded-xl border px-3 py-2 text-sm",
+                      selected ? "border-zinc-200 bg-zinc-200 text-zinc-900" : "border-zinc-800 text-zinc-200 hover:bg-zinc-900",
+                    ].join(" ")}
+                    aria-pressed={selected}
+                    title={selected ? "もう一度押すと解除" : "選択"}
+                  >
+                    {moodLabel(m)}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="mt-2 text-xs text-zinc-500">※同じボタンをもう一度押すと「未設定」に戻ります</p>
           </div>
 
-          <p className="mt-2 text-xs text-zinc-500">※同じボタンをもう一度押すと「未設定」に戻ります</p>
-        </div>
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+            <h2 className="text-sm font-semibold text-zinc-200">ひとこと（任意）</h2>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-          <h2 className="text-sm font-semibold text-zinc-200">ひとこと（任意）</h2>
+            <textarea
+              value={day.memo}
+              onChange={(e) => onMemoChange(e.target.value)}
+              placeholder="ひとこと（例：今日はここまでで十分）"
+              className="mt-3 h-24 w-full resize-y rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+            />
 
-          <textarea
-            value={day.memo}
-            onChange={(e) => onMemoChange(e.target.value)}
-            placeholder="ひとこと（例：今日はここまでで十分）"
-            className="mt-3 h-24 w-full resize-y rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
-          />
-
-          <p className="mt-2 text-xs text-zinc-500">※入力は少し待って自動保存されます</p>
-        </div>
+            <p className="mt-2 text-xs text-zinc-500">※入力は少し待って自動保存されます</p>
+          </div>
+        </section>
       </section>
-    </section>
+    </main>
   );
 }

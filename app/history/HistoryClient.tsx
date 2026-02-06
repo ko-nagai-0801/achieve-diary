@@ -176,7 +176,7 @@ export default function HistoryClient() {
   }, [entries, aliases, q, mode]);
 
   return (
-    <main className="mx-auto w-full max-w-3xl p-4 md:p-6">
+    <main className="w-full p-4 md:p-6">
       <header className="mb-6 flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">履歴</h1>
