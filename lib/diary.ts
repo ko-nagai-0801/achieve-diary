@@ -65,22 +65,50 @@ export function scanDaysFromStorage(storage: Storage): DayEntry[] {
   return Array.from(map.values()).sort((a, b) => b.ymd.localeCompare(a.ymd));
 }
 
-function normalizeTag(raw: string): string {
-  const t = raw.normalize("NFKC").trim();
-  return t.toLowerCase();
+/**
+ * タグの表記ゆれ辞書（必要に応じて追加）
+ * - key: 正規化後のタグ（小文字/全角半角統一済み、#除去済み）
+ * - value: 採用したい正規タグ（表示にも使われます）
+ */
+const TAG_ALIASES: Record<string, string> = {
+  // 例：ひらがな → 漢字へ統一
+  けんこう: "健康",
+  べんきょう: "学習",
+  じむ: "事務",
+
+  // 例：英語 → 日本語へ統一
+  health: "健康",
+  study: "学習",
+  work: "仕事",
+};
+
+function normalizeTagKey(raw: string): string {
+  // 全角半角統一 → trim → 英字は小文字化
+  return raw.normalize("NFKC").trim().toLowerCase();
+}
+
+function normalizeTagValue(raw: string): string {
+  // 表示用（必要ならここでさらに整形）
+  return raw.normalize("NFKC").trim();
+}
+
+export function canonicalizeTag(raw: string): string {
+  const k = normalizeTagKey(raw);
+  const aliased = TAG_ALIASES[k];
+  return aliased ? normalizeTagValue(aliased) : k;
 }
 
 /**
  * text から #tag を抽出（複数行OK）
  * - 末尾の記号は除去
  * - 1アイテム内で同じタグが複数回出ても1回として扱う
+ * - 表記ゆれ辞書で正規化して返す
  */
 export function extractTags(text: string): string[] {
   const set = new Set<string>();
-
   const re = /#([^\s#]+)/g;
-  let m: RegExpExecArray | null;
 
+  let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     let tag = m[1] ?? "";
 
@@ -88,10 +116,10 @@ export function extractTags(text: string): string[] {
     tag = tag.replace(/^[\(\[【「『（]+/g, "");
     tag = tag.replace(/[\)\]\}】」』）、。．.,!?:;！？]+$/g, "");
 
-    const n = normalizeTag(tag);
-    if (!n) continue;
+    const canon = canonicalizeTag(tag);
+    if (!canon) continue;
 
-    set.add(n);
+    set.add(canon);
   }
 
   return Array.from(set.values());
@@ -100,6 +128,5 @@ export function extractTags(text: string): string[] {
 export function includesQuery(haystack: string, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-
   return haystack.toLowerCase().includes(q);
 }

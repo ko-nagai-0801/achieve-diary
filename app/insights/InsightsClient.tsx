@@ -18,7 +18,6 @@ function countDone(items: AchieveItem[]): number {
 }
 
 function jstYmdFromDate(d: Date): string {
-  // "en-CA" は YYYY-MM-DD 形式になりやすい（JST固定）
   const fmt = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Tokyo",
     year: "numeric",
@@ -69,7 +68,6 @@ export default function InsightsClient() {
   const filteredEntries = useMemo(() => {
     const cutoff = cutoffYmdForRange(range);
     if (!cutoff) return entries;
-    // ymd が YYYY-MM-DD なら文字列比較でOK
     return entries.filter((e) => e.ymd >= cutoff);
   }, [entries, range]);
 
@@ -92,7 +90,7 @@ export default function InsightsClient() {
 
     for (const e of filteredEntries) {
       for (const it of e.day.items) {
-        const tags = extractTags(it.text);
+        const tags = extractTags(it.text); // ✅ 辞書で正規化済み
         for (const t of tags) {
           map.set(t, (map.get(t) ?? 0) + 1);
         }
@@ -119,8 +117,7 @@ export default function InsightsClient() {
   }
 
   function goHistoryByTag(tag: string) {
-    const q = `#${tag}`;
-    router.push(`/history?q=${encodeURIComponent(q)}&mode=tag`);
+    router.push(`/history?q=${encodeURIComponent(`#${tag}`)}&mode=tag`);
   }
 
   return (
@@ -142,14 +139,11 @@ export default function InsightsClient() {
         </button>
       </header>
 
-      {/* 期間フィルタ */}
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-sm font-semibold text-zinc-200">期間</h2>
-            <p className="mt-1 text-xs text-zinc-500">
-              対象：{rangeLabel(range)}
-            </p>
+            <p className="mt-1 text-xs text-zinc-500">対象：{rangeLabel(range)}</p>
           </div>
 
           <div className="inline-flex rounded-xl border border-zinc-800 bg-zinc-950/40 p-1">
@@ -196,9 +190,7 @@ export default function InsightsClient() {
       <section className="mt-4 grid gap-3 md:grid-cols-3">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
           <p className="text-xs text-zinc-400">日数</p>
-          <p className="mt-1 text-2xl font-semibold text-zinc-100">
-            {summary.days}
-          </p>
+          <p className="mt-1 text-2xl font-semibold text-zinc-100">{summary.days}</p>
         </div>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
           <p className="text-xs text-zinc-400">合計アイテム</p>
@@ -208,16 +200,14 @@ export default function InsightsClient() {
         </div>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
           <p className="text-xs text-zinc-400">完了</p>
-          <p className="mt-1 text-2xl font-semibold text-zinc-100">
-            {summary.doneItems}
-          </p>
+          <p className="mt-1 text-2xl font-semibold text-zinc-100">{summary.doneItems}</p>
         </div>
       </section>
 
       <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
         <h2 className="text-sm font-semibold text-zinc-200">タグ上位（#tag）</h2>
         <p className="mt-1 text-xs text-zinc-500">
-          ※1アイテム内で同じタグが複数回出ても1回としてカウント / クリックで履歴検索へ
+          ※表記ゆれ辞書で統一 / クリックで履歴検索へ
         </p>
 
         {topTags.length === 0 ? (

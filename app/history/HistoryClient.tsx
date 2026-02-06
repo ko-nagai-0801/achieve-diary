@@ -1,8 +1,8 @@
 /* app/history/HistoryClient.tsx */
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   extractTags,
   includesQuery,
@@ -30,16 +30,17 @@ function itemMatchesText(it: AchieveItem, q: string): boolean {
 }
 
 function itemMatchesTag(it: AchieveItem, tagQ: string): boolean {
-  const tags = extractTags(it.text);
-  return tags.some((t) => t.includes(tagQ));
+  const tags = extractTags(it.text); // ✅ 辞書で正規化済みタグ
+  return tags.some((t) => t.toLowerCase().includes(tagQ));
 }
 
 export default function HistoryClient() {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const initModeParam = searchParams.get("mode");
-  const initMode: SearchMode = initModeParam === "tag" ? "tag" : "text";
-  const initQuery = searchParams.get("q") ?? "";
+  const urlQ = searchParams.get("q") ?? "";
+  const urlMode: SearchMode = searchParams.get("mode") === "tag" ? "tag" : "text";
 
   const [entries, setEntries] = useState<DayEntry[]>(() => {
     if (typeof window === "undefined") return [];
@@ -47,18 +48,24 @@ export default function HistoryClient() {
   });
 
   const [selectedYmd, setSelectedYmd] = useState<string | null>(null);
-  const [query, setQuery] = useState<string>(initQuery);
-  const [searchMode, setSearchMode] = useState<SearchMode>(initMode);
+  const [query, setQuery] = useState<string>(urlQ);
+  const [searchMode, setSearchMode] = useState<SearchMode>(urlMode);
+
+  // 初回のみ自動選択（ユーザーが明示的に閉じた場合は勝手に戻さない）
+  const didAutoSelectRef = useRef<boolean>(false);
 
   const refresh = useCallback(() => {
     const next = scanDaysFromStorage(window.localStorage);
     setEntries(next);
 
+    // 選択中の日付が消えていたら、選択解除（後段の自動選択で復帰させる）
     if (selectedYmd && !next.some((e) => e.ymd === selectedYmd)) {
       setSelectedYmd(null);
+      didAutoSelectRef.current = false;
     }
   }, [selectedYmd]);
 
+  // フォーカス復帰/可視化で再読込
   useEffect(() => {
     const onFocus = () => refresh();
     const onVis = () => {
@@ -74,6 +81,17 @@ export default function HistoryClient() {
     };
   }, [refresh]);
 
+  // URL → state 同期（共有リンクで開いたとき/戻る進む対策）
+  useEffect(() => {
+    const nextQ = searchParams.get("q") ?? "";
+    const nextMode: SearchMode =
+      searchParams.get("mode") === "tag" ? "tag" : "text";
+
+    if (nextQ !== query) setQuery(nextQ);
+    if (nextMode !== searchMode) setSearchMode(nextMode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const q = query.trim();
   const tagQ = useMemo(() => normalizeTagQuery(q), [q]);
 
@@ -85,12 +103,23 @@ export default function HistoryClient() {
       return entries.filter((e) => e.day.items.some((it) => itemMatchesTag(it, tagQ)));
     }
 
-    // text: 日付 or 本文に部分一致
     return entries.filter((e) => {
       if (includesQuery(e.ymd, q)) return true;
       return e.day.items.some((it) => itemMatchesText(it, q));
     });
   }, [entries, q, tagQ, searchMode]);
+
+  // ✅ 初期状態：最新日（検索中ならヒットした最新日）を自動選択
+  useEffect(() => {
+    if (didAutoSelectRef.current) return;
+    if (entries.length === 0) return;
+
+    const candidate = (q ? filteredEntries[0]?.ymd : entries[0]?.ymd) ?? null;
+    if (!candidate) return;
+
+    setSelectedYmd(candidate);
+    didAutoSelectRef.current = true;
+  }, [entries, filteredEntries, q]);
 
   const selected = useMemo(() => {
     if (!selectedYmd) return null;
@@ -109,6 +138,25 @@ export default function HistoryClient() {
     return selected.day.items.filter((it) => itemMatchesText(it, q));
   }, [selected, q, tagQ, searchMode]);
 
+  // ✅ state → URL 同期（入力・トグル変更で ?q= / mode= を更新）
+  useEffect(() => {
+    const currentQ = searchParams.get("q") ?? "";
+    const currentMode: SearchMode =
+      searchParams.get("mode") === "tag" ? "tag" : "text";
+
+    const nextQ = query.trim();
+    const nextMode = searchMode;
+
+    if (currentQ === nextQ && currentMode === nextMode) return;
+
+    const params = new URLSearchParams();
+    if (nextQ) params.set("q", nextQ);
+    if (nextMode === "tag") params.set("mode", "tag");
+
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname);
+  }, [query, searchMode, router, pathname, searchParams]);
+
   return (
     <main className="mx-auto w-full max-w-3xl p-4 md:p-6">
       <header className="mb-6 flex items-start justify-between gap-3">
@@ -121,7 +169,10 @@ export default function HistoryClient() {
 
         <button
           type="button"
-          onClick={refresh}
+          onClick={() => {
+            refresh();
+            didAutoSelectRef.current = false;
+          }}
           className="shrink-0 whitespace-nowrap rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900"
         >
           更新
@@ -140,14 +191,13 @@ export default function HistoryClient() {
           </div>
 
           <div className="mt-3 flex flex-col gap-2">
-            {/* 検索 */}
             <div className="flex gap-2">
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={
                   searchMode === "tag"
-                    ? "タグ検索（例：#健康 / 健康）"
+                    ? "タグ検索（例：#健康 / けんこう / health）"
                     : "本文検索（例：散歩 / 洗い物）"
                 }
                 className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
@@ -162,7 +212,6 @@ export default function HistoryClient() {
               </button>
             </div>
 
-            {/* トグル */}
             <div className="flex items-center gap-2">
               <span className="text-xs text-zinc-500">検索対象</span>
               <div className="inline-flex rounded-xl border border-zinc-800 bg-zinc-950/40 p-1">
@@ -193,7 +242,9 @@ export default function HistoryClient() {
               </div>
 
               {searchMode === "tag" ? (
-                <p className="text-xs text-zinc-500">※ # なしでもOK（部分一致）</p>
+                <p className="text-xs text-zinc-500">
+                  ※ #なしOK / 表記ゆれ辞書で統一されます
+                </p>
               ) : null}
             </div>
           </div>
@@ -213,9 +264,7 @@ export default function HistoryClient() {
                   <li key={e.ymd}>
                     <button
                       type="button"
-                      onClick={() =>
-                        setSelectedYmd((prev) => (prev === e.ymd ? null : e.ymd))
-                      }
+                      onClick={() => setSelectedYmd(e.ymd)}
                       className={
                         "w-full rounded-xl border px-3 py-2 text-left transition " +
                         (active
@@ -229,7 +278,6 @@ export default function HistoryClient() {
                           {done}/{total}
                         </p>
                       </div>
-                      {/* ✅ key: ... は削除（本番向け） */}
                     </button>
                   </li>
                 );
