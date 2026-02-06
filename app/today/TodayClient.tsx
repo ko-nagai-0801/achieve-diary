@@ -81,7 +81,7 @@ export default function TodayClient() {
     try {
       const item: AchieveItem = {
         id: createId(),
-        text: v, // ✅ 複数行もそのまま保存
+        text: v,
         done: false,
         createdAt: nowIso(),
       };
@@ -118,7 +118,7 @@ export default function TodayClient() {
   }
 
   // ✅ Cmd+Enter / Ctrl+Enter で追加（Enter単体は改行）
-  function onTextAreaKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+  function onAddKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key !== "Enter") return;
     if (e.nativeEvent.isComposing) return;
     if (e.repeat) return;
@@ -130,10 +130,10 @@ export default function TodayClient() {
     addItem();
   }
 
-  // ===== 編集（複数行対応）=====
+  // ===== 編集（複数行・保存ルール統一）=====
   function startEdit(item: AchieveItem) {
     setEditingId(item.id);
-    setEditText(item.text); // ✅ 改行含めてセット
+    setEditText(item.text);
     setConfirmDeleteId(null);
   }
 
@@ -233,7 +233,7 @@ export default function TodayClient() {
             ref={inputRef}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            onKeyDown={onTextAreaKeyDown}
+            onKeyDown={onAddKeyDown}
             placeholder={
               "できたことを複数行でOK（例：\n・洗い物した\n・5分歩いた #健康）"
             }
@@ -243,9 +243,8 @@ export default function TodayClient() {
 
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <p className="text-xs text-zinc-400">
-              ショートカット：Macは{" "}
-              <span className="font-semibold">⌘ + Enter</span>、Windowsは{" "}
-              <span className="font-semibold">Ctrl + Enter</span> で追加（Enterは改行）
+              追加：Macは <span className="font-semibold">⌘ + Enter</span>、Windowsは{" "}
+              <span className="font-semibold">Ctrl + Enter</span>（Enterは改行）
             </p>
 
             <div className="flex justify-end">
@@ -308,7 +307,6 @@ export default function TodayClient() {
                           value={editText}
                           onChange={(e) => setEditText(e.target.value)}
                           onKeyDown={onEditKeyDown}
-                          onBlur={saveEdit}
                           rows={3}
                           className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
                         />
@@ -418,8 +416,6 @@ export default function TodayClient() {
                             type="button"
                             onClick={() => deleteItemNow(item.id)}
                             className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
-                            aria-label="本当に削除"
-                            title="本当に削除"
                           >
                             本当に削除
                           </button>
@@ -427,8 +423,6 @@ export default function TodayClient() {
                             type="button"
                             onClick={cancelDelete}
                             className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
-                            aria-label="やめる"
-                            title="やめる"
                           >
                             やめる
                           </button>
@@ -439,8 +433,6 @@ export default function TodayClient() {
                             type="button"
                             onClick={() => startEdit(item)}
                             className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
-                            aria-label="編集"
-                            title="編集"
                           >
                             編集
                           </button>
@@ -448,8 +440,6 @@ export default function TodayClient() {
                             type="button"
                             onClick={() => requestDelete(item.id)}
                             className="rounded-lg border border-zinc-800 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
-                            aria-label="削除"
-                            title="削除"
                           >
                             削除
                           </button>
