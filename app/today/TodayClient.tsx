@@ -7,15 +7,16 @@ import {
   createId,
   loadDay,
   saveDay,
+  scanDaysFromStorage,
   type AchieveDay,
   type AchieveItem,
+  type AchieveMood,
+  type DayEntry,
 } from "@/lib/storage";
 import {
   extractTags,
   loadTagAliases,
   normalizeAliasKey,
-  scanDaysFromStorage,
-  type DayEntry,
   type TagAliases,
 } from "@/lib/diary";
 
@@ -57,13 +58,12 @@ function lastNYmds(n: number): string[] {
 }
 
 function invertAliases(aliases: TagAliases): Map<string, string[]> {
-  // canonicalValue -> [aliasKeys]
   const inv = new Map<string, string[]>();
   for (const [k, v] of Object.entries(aliases)) {
     const canon = v.normalize("NFKC").trim();
     if (!canon) continue;
     const arr = inv.get(canon) ?? [];
-    arr.push(k); // すでにnormalizeAliasKey済みのkeyが入る想定
+    arr.push(k);
     inv.set(canon, arr);
   }
   return inv;
@@ -73,10 +73,7 @@ function buildTagSuggestions(entries: DayEntry[], aliases: TagAliases): TagSugge
   const inv = invertAliases(aliases);
   const recentSet = new Set<string>(lastNYmds(7));
 
-  const stat = new Map<
-    string,
-    { total: number; recent7: number; lastSeen: string }
-  >();
+  const stat = new Map<string, { total: number; recent7: number; lastSeen: string }>();
 
   for (const e of entries) {
     const isRecent7 = recentSet.has(e.ymd);
@@ -98,24 +95,16 @@ function buildTagSuggestions(entries: DayEntry[], aliases: TagAliases): TagSugge
     totalCount: s.total,
     recent7Count: s.recent7,
     lastSeenYmd: s.lastSeen,
-    matchKeys: [
-      tag.normalize("NFKC").trim().toLowerCase(),
-      ...(inv.get(tag) ?? []),
-    ],
+    matchKeys: [tag.normalize("NFKC").trim().toLowerCase(), ...(inv.get(tag) ?? [])],
   }));
 
-  // ✅ 直近7日優先 → 直近7日出現数 → 最終出現日 → 全期間出現数 → タグ名
   arr.sort((a, b) => {
     const ar = a.recent7Count > 0 ? 1 : 0;
     const br = b.recent7Count > 0 ? 1 : 0;
     if (br !== ar) return br - ar;
-
     if (b.recent7Count !== a.recent7Count) return b.recent7Count - a.recent7Count;
-
     if (b.lastSeenYmd !== a.lastSeenYmd) return b.lastSeenYmd.localeCompare(a.lastSeenYmd);
-
     if (b.totalCount !== a.totalCount) return b.totalCount - a.totalCount;
-
     return a.tag.localeCompare(b.tag);
   });
 
@@ -126,20 +115,15 @@ function getActiveTagToken(
   text: string,
   cursor: number,
 ): { hashIndex: number; token: string } | null {
-  // cursor直前までで最後の '#'
   const before = text.slice(0, cursor);
   const hashIndex = before.lastIndexOf("#");
   if (hashIndex === -1) return null;
 
-  // '#...' が空白/改行の後に続く場合のみ対象にする（誤検出を減らす）
   if (hashIndex > 0) {
     const prev = before[hashIndex - 1] ?? "";
-    if (!/\s/.test(prev)) {
-      return null; // 例: abc#def は対象外
-    }
+    if (!/\s/.test(prev)) return null;
   }
 
-  // token は '#'+(空白まで) — ただし cursor までに空白が含まれていたら対象外
   const afterHash = before.slice(hashIndex + 1);
   if (/\s/.test(afterHash)) return null;
 
@@ -158,6 +142,17 @@ function saveBool(storage: Storage, key: string, value: boolean): void {
   storage.setItem(key, value ? "1" : "0");
 }
 
+function moodLabel(m: Exclude<AchieveMood, null>): string {
+  switch (m) {
+    case "good":
+      return "🙂 良い";
+    case "neutral":
+      return "😐 ふつう";
+    case "tough":
+      return "😣 しんどい";
+  }
+}
+
 export default function TodayClient() {
   const [ymd] = useState<string>(() => formatJstYmd());
   const long = useMemo(() => formatJstLong(), []);
@@ -171,14 +166,11 @@ export default function TodayClient() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const caretRef = useRef<number>(0);
 
-  // ✅ 二重追加防止
   const addLockRef = useRef<boolean>(false);
 
-  // ✅ 編集状態（複数行）
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState<string>("");
 
-  // ✅ 削除確認状態（ワンクリック削除を防ぐ）
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // ===== タグ候補データ =====
@@ -208,11 +200,10 @@ export default function TodayClient() {
     saveBool(window.localStorage, TAG_SUGGEST_SPACE_KEY, next);
   }
 
-  // 入力フォーカス状態（#を打った時だけ候補を開くために使用）
   const [focused, setFocused] = useState<boolean>(false);
-
-  // ✅ 候補クリック後に閉じるためのフラグ（次の入力/クリックで再開）
   const [suggestEnabled, setSuggestEnabled] = useState<boolean>(true);
+
+  const memoTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const onFocus = () => refreshTagData();
@@ -226,46 +217,66 @@ export default function TodayClient() {
     return () => {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVis);
+
+      if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+      if (memoTimerRef.current !== null) window.clearTimeout(memoTimerRef.current);
     };
   }, [refreshTagData]);
 
-  const allSuggestions = useMemo(
-    () => buildTagSuggestions(entries, aliases),
-    [entries, aliases],
-  );
+  const allSuggestions = useMemo(() => buildTagSuggestions(entries, aliases), [entries, aliases]);
 
   const activeTag = useMemo(() => {
     const cursor = caretRef.current;
     return getActiveTagToken(text, cursor);
   }, [text]);
 
-  // ✅ 「# 入力直後に自動で候補を開く」：フォーカス中 & #タグ編集中 & 有効時だけ表示
   const shouldShowSuggest = focused && suggestEnabled && activeTag !== null;
 
   const filteredSuggestions = useMemo(() => {
     if (!shouldShowSuggest) return [];
 
-    // token が空（#直後）なら、直近7日優先順の上位を出す
     const tokenNorm = normalizeAliasKey(activeTag?.token ?? "");
     if (!tokenNorm) return allSuggestions.slice(0, 10);
 
-    return allSuggestions
-      .filter((s) => s.matchKeys.some((k) => k.includes(tokenNorm)))
-      .slice(0, 10);
+    return allSuggestions.filter((s) => s.matchKeys.some((k) => k.includes(tokenNorm))).slice(0, 10);
   }, [shouldShowSuggest, activeTag, allSuggestions]);
+
+  function flashSaved() {
+    setSaveState("saved");
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => setSaveState("idle"), 900);
+  }
+
+  function persist(next: AchieveDay) {
+    saveDay(next);
+    flashSaved();
+  }
+
+  // ✅ storage側の最新を読み直して items を守りつつマージ（空items上書き防止）
+  function mergeWithStored(partial: Partial<AchieveDay>): AchieveDay {
+    const stored = loadDay(ymd);
+    const base = stored.items.length >= day.items.length ? stored : day;
+
+    return {
+      ymd,
+      items: base.items,
+      mood: base.mood ?? null,
+      memo: typeof base.memo === "string" ? base.memo : "",
+      updatedAt: base.updatedAt,
+      ...partial,
+    };
+  }
 
   function insertTag(tag: string) {
     const el = inputRef.current;
     if (!el) return;
 
     const cursor = caretRef.current;
-
     const active = getActiveTagToken(text, cursor);
     if (!active) return;
 
     const { hashIndex } = active;
 
-    // 置換対象の末尾：cursor以降もタグ文字が続いているなら空白まで置換
     let end = cursor;
     while (end < text.length && !/\s/.test(text[end] ?? "")) end++;
 
@@ -273,7 +284,6 @@ export default function TodayClient() {
     const after = text.slice(end);
 
     let inserted = `#${tag}`;
-    // ✅ オプションONなら、置換した直後に半角スペースを補う
     if (autoSpace) {
       const nextChar = after[0] ?? "";
       const needSpace = after.length === 0 || (nextChar !== "" && !/\s/.test(nextChar));
@@ -284,8 +294,6 @@ export default function TodayClient() {
     const nextCursor = (before + inserted).length;
 
     setText(nextText);
-
-    // ✅ ここで「候補モーダルを閉じる」
     setSuggestEnabled(false);
 
     window.setTimeout(() => {
@@ -297,31 +305,8 @@ export default function TodayClient() {
     }, 0);
   }
 
-  useEffect(() => {
-    return () => {
-      if (saveTimerRef.current !== null) {
-        window.clearTimeout(saveTimerRef.current);
-      }
-    };
-  }, []);
-
   const totalCount = day.items.length;
   const canAdd = text.trim().length > 0;
-
-  function flashSaved() {
-    setSaveState("saved");
-    if (saveTimerRef.current !== null) {
-      window.clearTimeout(saveTimerRef.current);
-    }
-    saveTimerRef.current = window.setTimeout(() => {
-      setSaveState("idle");
-    }, 900);
-  }
-
-  function persist(next: AchieveDay) {
-    saveDay(next);
-    flashSaved();
-  }
 
   function addItem() {
     if (addLockRef.current) return;
@@ -335,7 +320,6 @@ export default function TodayClient() {
       const item: AchieveItem = {
         id: createId(),
         text: v,
-        // ✅ できたことなので常に true（UIチェック無し）
         done: true,
         createdAt: nowIso(),
       };
@@ -353,8 +337,6 @@ export default function TodayClient() {
       inputRef.current?.focus();
 
       setConfirmDeleteId(null);
-
-      // 追加後はタグ候補にも反映されるよう更新
       refreshTagData();
     } finally {
       window.setTimeout(() => {
@@ -363,7 +345,6 @@ export default function TodayClient() {
     }
   }
 
-  // ✅ Cmd+Enter / Ctrl+Enter で追加（Enter単体は改行）
   function onAddKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key !== "Enter") return;
     if (e.nativeEvent.isComposing) return;
@@ -376,7 +357,6 @@ export default function TodayClient() {
     addItem();
   }
 
-  // ===== 編集（保存ルール：Cmd/Ctrl+Enter or 保存ボタンのみ）=====
   function startEdit(item: AchieveItem) {
     setEditingId(item.id);
     setEditText(item.text);
@@ -407,7 +387,6 @@ export default function TodayClient() {
     refreshTagData();
   }
 
-  // ✅ 編集時：Enterは改行、Cmd/Ctrl+Enterで保存、Escでキャンセル
   function onEditKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Escape") {
       e.preventDefault();
@@ -428,11 +407,8 @@ export default function TodayClient() {
 
   const editCanSave = editText.trim().length > 0;
 
-  // ===== 削除（確認付き）=====
   function requestDelete(id: string) {
-    if (editingId && editingId !== id) {
-      cancelEdit();
-    }
+    if (editingId && editingId !== id) cancelEdit();
     setConfirmDeleteId((prev) => (prev === id ? null : id));
   }
 
@@ -458,6 +434,25 @@ export default function TodayClient() {
     refreshTagData();
   }
 
+  // ===== 気分 / ひとこと =====
+  function setMood(nextMood: Exclude<AchieveMood, null>) {
+    const mood: AchieveMood = day.mood === nextMood ? null : nextMood;
+    const merged = mergeWithStored({ mood });
+    setDay(merged);
+    persist(merged);
+  }
+
+  function onMemoChange(v: string) {
+    const merged = mergeWithStored({ memo: v });
+    setDay(merged);
+
+    if (memoTimerRef.current !== null) window.clearTimeout(memoTimerRef.current);
+    memoTimerRef.current = window.setTimeout(() => {
+      const again = mergeWithStored({ memo: v });
+      persist(again);
+    }, 350);
+  }
+
   return (
     <section className="space-y-6">
       <header className="space-y-2">
@@ -467,9 +462,7 @@ export default function TodayClient() {
 
         <div className="flex items-center justify-between">
           <p className="text-sm text-zinc-400">{long}</p>
-          <p className="text-xs text-zinc-500">
-            自動保存 {saveState === "saved" ? "✓" : ""}
-          </p>
+          <p className="text-xs text-zinc-500">自動保存 {saveState === "saved" ? "✓" : ""}</p>
         </div>
       </header>
 
@@ -485,25 +478,17 @@ export default function TodayClient() {
                 const v = e.target.value;
                 setText(v);
                 caretRef.current = e.target.selectionStart ?? v.length;
-
-                // ✅ 何か入力したら候補再開
                 setSuggestEnabled(true);
               }}
               onKeyDown={(e) => {
-                // caret更新（#入力直後に候補を開くため）
                 const el = e.currentTarget;
                 caretRef.current = el.selectionStart ?? el.value.length;
-
-                // ✅ キー操作が入ったら候補再開（#を打てば開く）
                 setSuggestEnabled(true);
-
                 onAddKeyDown(e);
               }}
               onClick={(e) => {
                 const el = e.currentTarget;
                 caretRef.current = el.selectionStart ?? el.value.length;
-
-                // ✅ クリックでカーソル移動した場合も候補再開
                 setSuggestEnabled(true);
               }}
               onKeyUp={(e) => {
@@ -516,21 +501,16 @@ export default function TodayClient() {
                 refreshTagData();
               }}
               onBlur={() => setFocused(false)}
-              placeholder={
-                "できたことを複数行でOK（例：\n・洗い物した\n・5分歩いた #健康）"
-              }
+              placeholder={"できたことを複数行でOK（例：\n・洗い物した\n・5分歩いた #健康）"}
               rows={4}
               className="w-full resize-y rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
             />
 
-            {/* ✅ タグ候補サジェスト：フォーカス中 & #タグ編集中 & enabled */}
             {shouldShowSuggest && filteredSuggestions.length > 0 ? (
               <div className="absolute left-0 right-0 top-[calc(100%+8px)] z-20 rounded-xl border border-zinc-800 bg-zinc-950/95 p-2 shadow-lg">
                 <div className="flex items-center justify-between px-2 pb-1">
                   <div>
-                    <p className="text-xs text-zinc-500">
-                      タグ候補（直近7日優先）
-                    </p>
+                    <p className="text-xs text-zinc-500">タグ候補（直近7日優先）</p>
                     <p className="text-[11px] text-zinc-500">
                       ヒント：<span className="font-semibold">#</span>の後に入力すると絞り込み
                     </p>
@@ -576,9 +556,7 @@ export default function TodayClient() {
                     候補クリック後に半角スペースを自動挿入
                   </label>
 
-                  <span className="text-[11px] text-zinc-500">
-                    ON/OFFは保存されます
-                  </span>
+                  <span className="text-[11px] text-zinc-500">ON/OFFは保存されます</span>
                 </div>
               </div>
             ) : null}
@@ -602,9 +580,7 @@ export default function TodayClient() {
             </div>
           </div>
 
-          <p className="text-xs text-zinc-400">
-            ※MVPでは #タグ を本文に書く方式（例：散歩した #健康）
-          </p>
+          <p className="text-xs text-zinc-400">※MVPでは #タグ を本文に書く方式（例：散歩した #健康）</p>
         </div>
       </section>
 
@@ -625,10 +601,7 @@ export default function TodayClient() {
               const isConfirmingDelete = confirmDeleteId === item.id;
 
               return (
-                <li
-                  key={item.id}
-                  className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2"
-                >
+                <li key={item.id} className="rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2">
                   <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">
                       {isEditing ? (
@@ -691,37 +664,17 @@ export default function TodayClient() {
                               </button>
                             )}
 
-                            <p className="ml-auto text-xs text-zinc-500">
-                              ⌘/Ctrl+Enter=保存 / Esc=キャンセル（Enterは改行）
-                            </p>
+                            <p className="ml-auto text-xs text-zinc-500">⌘/Ctrl+Enter=保存 / Esc=キャンセル（Enterは改行）</p>
                           </div>
-
-                          {isConfirmingDelete && (
-                            <p className="mt-2 text-xs text-zinc-500">
-                              ※誤操作防止のため、削除は確認が必要です
-                            </p>
-                          )}
                         </>
                       ) : (
                         <>
-                          <button
-                            type="button"
-                            onClick={() => startEdit(item)}
-                            className="w-full text-left"
-                            aria-label="編集"
-                            title="クリックで編集"
-                          >
-                            <p className="whitespace-pre-wrap break-words text-zinc-100">
-                              {item.text}
-                            </p>
+                          <button type="button" onClick={() => startEdit(item)} className="w-full text-left" aria-label="編集" title="クリックで編集">
+                            <p className="whitespace-pre-wrap break-words text-zinc-100">{item.text}</p>
                           </button>
 
                           <p className="mt-1 text-xs text-zinc-500">
-                            {new Date(item.createdAt).toLocaleString("ja-JP", {
-                              timeZone: "Asia/Tokyo",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
+                            {new Date(item.createdAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" })}
                           </p>
                         </>
                       )}
@@ -777,38 +730,42 @@ export default function TodayClient() {
       <section className="grid gap-3 md:grid-cols-2">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
           <h2 className="text-sm font-semibold text-zinc-200">気分（任意）</h2>
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              className="rounded-xl border border-zinc-800 px-3 py-2 text-sm text-zinc-200 opacity-60"
-              disabled
-            >
-              🙂 良い
-            </button>
-            <button
-              type="button"
-              className="rounded-xl border border-zinc-800 px-3 py-2 text-sm text-zinc-200 opacity-60"
-              disabled
-            >
-              😐 ふつう
-            </button>
-            <button
-              type="button"
-              className="rounded-xl border border-zinc-800 px-3 py-2 text-sm text-zinc-200 opacity-60"
-              disabled
-            >
-              😣 しんどい
-            </button>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(["good", "neutral", "tough"] as const).map((m) => {
+              const selected = day.mood === m;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMood(m)}
+                  className={[
+                    "rounded-xl border px-3 py-2 text-sm",
+                    selected ? "border-zinc-200 bg-zinc-200 text-zinc-900" : "border-zinc-800 text-zinc-200 hover:bg-zinc-900",
+                  ].join(" ")}
+                  aria-pressed={selected}
+                  title={selected ? "もう一度押すと解除" : "選択"}
+                >
+                  {moodLabel(m)}
+                </button>
+              );
+            })}
           </div>
+
+          <p className="mt-2 text-xs text-zinc-500">※同じボタンをもう一度押すと「未設定」に戻ります</p>
         </div>
 
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
           <h2 className="text-sm font-semibold text-zinc-200">ひとこと（任意）</h2>
+
           <textarea
+            value={day.memo}
+            onChange={(e) => onMemoChange(e.target.value)}
             placeholder="ひとこと（例：今日はここまでで十分）"
-            className="mt-3 h-24 w-full resize-none rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
-            disabled
+            className="mt-3 h-24 w-full resize-y rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
           />
+
+          <p className="mt-2 text-xs text-zinc-500">※入力は少し待って自動保存されます</p>
         </div>
       </section>
     </section>

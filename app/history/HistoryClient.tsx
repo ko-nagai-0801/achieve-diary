@@ -9,11 +9,9 @@ import {
   includesQuery,
   loadTagAliases,
   normalizeAliasKey,
-  scanDaysFromStorage,
-  type DayEntry,
   type TagAliases,
 } from "@/lib/diary";
-import type { AchieveItem } from "@/lib/storage";
+import { scanDaysFromStorage, type DayEntry, type AchieveItem } from "@/lib/storage";
 
 type SearchMode = "text" | "tag";
 
@@ -90,9 +88,7 @@ export default function HistoryClient() {
 
     if (mode === "tag") {
       if (!tagQ) return entries;
-      return entries.filter((e) =>
-        e.day.items.some((it) => itemMatchesTag(it, tagQ, aliases)),
-      );
+      return entries.filter((e) => e.day.items.some((it) => itemMatchesTag(it, tagQ, aliases)));
     }
 
     return entries.filter((e) => {
@@ -101,13 +97,9 @@ export default function HistoryClient() {
     });
   }, [entries, q, mode, tagQ, aliases]);
 
-  // ✅ 詳細の初期状態：最新（日付降順で先頭）を表示
-  // - 検索中なら「ヒットした最新日」
   const effectiveSelectedYmd = useMemo(() => {
     const list = q.trim() ? filteredEntries : entries;
     if (list.length === 0) return null;
-
-    // selectedYmdが現在のリストに存在すれば優先、無ければ最新を採用
     if (selectedYmd && list.some((e) => e.ymd === selectedYmd)) return selectedYmd;
     return list[0]?.ymd ?? null;
   }, [entries, filteredEntries, q, selectedYmd]);
@@ -130,7 +122,6 @@ export default function HistoryClient() {
     return selected.day.items.filter((it) => itemMatchesText(it, tq));
   }, [selected, q, mode, tagQ, aliases]);
 
-  // ===== URL同期（入力値・モードは URL をソースにする）=====
   function setQueryToUrl(next: string) {
     router.replace(buildUrl(pathname, next, mode));
   }
@@ -139,24 +130,19 @@ export default function HistoryClient() {
     router.replace(buildUrl(pathname, q, nextMode));
   }
 
-  // ===== タグ候補サジェスト =====
   const [showSuggest, setShowSuggest] = useState<boolean>(false);
 
   const tagSuggestions = useMemo(() => {
     if (entries.length === 0) return [];
 
-    // canonical tag counts
     const count = new Map<string, number>();
     for (const e of entries) {
       for (const it of e.day.items) {
         const tags = extractTags(it.text, aliases);
-        for (const t of tags) {
-          count.set(t, (count.get(t) ?? 0) + 1);
-        }
+        for (const t of tags) count.set(t, (count.get(t) ?? 0) + 1);
       }
     }
 
-    // invert aliases: canonicalValue -> aliasKeys
     const inv = new Map<string, string[]>();
     for (const [k, v] of Object.entries(aliases)) {
       const canon = v.trim();
@@ -166,7 +152,7 @@ export default function HistoryClient() {
       inv.set(canon, arr);
     }
 
-    const input = normalizeAliasKey(q); // 部分入力も含めて判定に使う
+    const input = normalizeAliasKey(q);
     const items = Array.from(count.entries()).map(([tag, c]) => ({
       tag,
       count: c,
@@ -194,9 +180,7 @@ export default function HistoryClient() {
       <header className="mb-6 flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">履歴</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            localStorage から読み取り、検索・詳細表示します。
-          </p>
+          <p className="mt-1 text-sm text-zinc-400">localStorage から読み取り、検索・詳細表示します。</p>
         </div>
 
         <button
@@ -214,9 +198,7 @@ export default function HistoryClient() {
             <div>
               <h2 className="text-sm font-semibold text-zinc-200">日付一覧</h2>
               <p className="mt-1 text-xs text-zinc-500">
-                {q.trim()
-                  ? `検索結果：${filteredEntries.length} 日`
-                  : `全体：${entries.length} 日`}
+                {q.trim() ? `検索結果：${filteredEntries.length} 日` : `全体：${entries.length} 日`}
               </p>
             </div>
           </div>
@@ -229,11 +211,7 @@ export default function HistoryClient() {
                   onChange={(e) => setQueryToUrl(e.target.value)}
                   onFocus={() => setShowSuggest(true)}
                   onBlur={() => setShowSuggest(false)}
-                  placeholder={
-                    mode === "tag"
-                      ? "タグ検索（例：#健康 / けんこう / health）"
-                      : "本文検索（例：散歩 / 洗い物）"
-                  }
+                  placeholder={mode === "tag" ? "タグ検索（例：#健康 / けんこう / health）" : "本文検索（例：散歩 / 洗い物）"}
                   className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
                 />
 
@@ -253,9 +231,7 @@ export default function HistoryClient() {
                             className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-sm text-zinc-100 hover:bg-zinc-900"
                           >
                             <span className="truncate">#{s.tag}</span>
-                            <span className="ml-3 shrink-0 text-xs text-zinc-400">
-                              × {s.count}
-                            </span>
+                            <span className="ml-3 shrink-0 text-xs text-zinc-400">× {s.count}</span>
                           </button>
                         </li>
                       ))}
@@ -282,9 +258,7 @@ export default function HistoryClient() {
                   onClick={() => setModeToUrl("text")}
                   className={
                     "rounded-lg px-3 py-1.5 text-xs transition " +
-                    (mode === "text"
-                      ? "bg-zinc-200 text-zinc-900"
-                      : "text-zinc-200 hover:bg-zinc-900")
+                    (mode === "text" ? "bg-zinc-200 text-zinc-900" : "text-zinc-200 hover:bg-zinc-900")
                   }
                 >
                   本文
@@ -294,20 +268,14 @@ export default function HistoryClient() {
                   onClick={() => setModeToUrl("tag")}
                   className={
                     "rounded-lg px-3 py-1.5 text-xs transition " +
-                    (mode === "tag"
-                      ? "bg-zinc-200 text-zinc-900"
-                      : "text-zinc-200 hover:bg-zinc-900")
+                    (mode === "tag" ? "bg-zinc-200 text-zinc-900" : "text-zinc-200 hover:bg-zinc-900")
                   }
                 >
                   タグ
                 </button>
               </div>
 
-              {mode === "tag" ? (
-                <p className="text-xs text-zinc-500">
-                  ※表記ゆれ辞書で統一（/insightsで編集）
-                </p>
-              ) : null}
+              {mode === "tag" ? <p className="text-xs text-zinc-500">※表記ゆれ辞書で統一（/insightsで編集）</p> : null}
             </div>
           </div>
 
@@ -328,9 +296,7 @@ export default function HistoryClient() {
                       onClick={() => setSelectedYmd(e.ymd)}
                       className={
                         "w-full rounded-xl border px-3 py-2 text-left transition " +
-                        (active
-                          ? "border-zinc-600 bg-zinc-950/60"
-                          : "border-zinc-800 bg-zinc-950/40 hover:bg-zinc-900")
+                        (active ? "border-zinc-600 bg-zinc-950/60" : "border-zinc-800 bg-zinc-950/40 hover:bg-zinc-900")
                       }
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -372,19 +338,10 @@ export default function HistoryClient() {
                 ) : (
                   <ul className="mt-2 space-y-2">
                     {visibleItems.map((it) => (
-                      <li
-                        key={it.id}
-                        className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
-                      >
-                        <p className="whitespace-pre-wrap break-words text-zinc-100">
-                          {it.text}
-                        </p>
+                      <li key={it.id} className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2">
+                        <p className="whitespace-pre-wrap break-words text-zinc-100">{it.text}</p>
                         <p className="mt-1 text-xs text-zinc-500">
-                          {new Date(it.createdAt).toLocaleString("ja-JP", {
-                            timeZone: "Asia/Tokyo",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                          {new Date(it.createdAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" })}
                         </p>
                       </li>
                     ))}
@@ -392,8 +349,7 @@ export default function HistoryClient() {
                 )}
 
                 <p className="mt-3 text-xs text-zinc-500">
-                  ※改行表示：<span className="font-semibold">whitespace-pre-wrap</span>{" "}
-                  を使用
+                  ※改行表示：<span className="font-semibold">whitespace-pre-wrap</span> を使用
                 </p>
               </div>
             </div>

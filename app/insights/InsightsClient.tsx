@@ -11,10 +11,9 @@ import {
   normalizeAliasValue,
   resetTagAliases,
   saveTagAliases,
-  scanDaysFromStorage,
-  type DayEntry,
   type TagAliases,
 } from "@/lib/diary";
+import { scanDaysFromStorage, type DayEntry } from "@/lib/storage";
 
 type TagCount = {
   tag: string;
@@ -34,23 +33,20 @@ function jstYmdFromDate(d: Date): string {
 }
 
 function jstMdFromYmd(ymd: string): string {
-  // YYYY-MM-DD -> MM/DD
   return `${ymd.slice(5, 7)}/${ymd.slice(8, 10)}`;
 }
 
 function cutoffYmdForRange(range: Range): string | null {
   if (range === "all") return null;
   const days = range === "7" ? 7 : 30;
-
   const d = new Date();
-  d.setDate(d.getDate() - (days - 1)); // 今日含めてN日
+  d.setDate(d.getDate() - (days - 1));
   return jstYmdFromDate(d);
 }
 
 function last7Ymds(): string[] {
   const out: string[] = [];
   const d = new Date();
-  // 6日前 → 今日 の順（左から右へ）
   for (let i = 6; i >= 0; i--) {
     const x = new Date(d);
     x.setDate(d.getDate() - i);
@@ -136,10 +132,7 @@ export default function InsightsClient() {
       }
     }
 
-    const arr: TagCount[] = Array.from(map.entries()).map(([tag, count]) => ({
-      tag,
-      count,
-    }));
+    const arr: TagCount[] = Array.from(map.entries()).map(([tag, count]) => ({ tag, count }));
 
     arr.sort((a, b) => {
       if (b.count !== a.count) return b.count - a.count;
@@ -159,7 +152,6 @@ export default function InsightsClient() {
     router.push(`/history?q=${encodeURIComponent(`#${tag}`)}&mode=tag`);
   }
 
-  // ===== タグ辞書モーダル =====
   const [dictOpen, setDictOpen] = useState<boolean>(false);
   const [rows, setRows] = useState<AliasRow[]>(() => aliasesToRows(aliases));
 
@@ -185,13 +177,11 @@ export default function InsightsClient() {
     setRows(aliasesToRows(next));
   }
 
-  // ===== タグ推移（直近7日：日別バッジ）=====
   const trend = useMemo(() => {
     const ymds = last7Ymds();
     const byYmd = new Map<string, DayEntry>();
     for (const e of entries) byYmd.set(e.ymd, e);
 
-    // ymd -> tag -> count
     const dayMaps: Array<Map<string, number>> = ymds.map((ymd) => {
       const m = new Map<string, number>();
       const e = byYmd.get(ymd);
@@ -204,7 +194,6 @@ export default function InsightsClient() {
       return m;
     });
 
-    // 直近7日合計で上位5タグ
     const total = new Map<string, number>();
     for (const m of dayMaps) {
       for (const [t, c] of m.entries()) total.set(t, (total.get(t) ?? 0) + c);
@@ -229,9 +218,7 @@ export default function InsightsClient() {
       <header className="mb-6 flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">インサイト</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            localStorage から集計します（タグ上位・タグ推移など）。
-          </p>
+          <p className="mt-1 text-sm text-zinc-400">localStorage から集計します（タグ上位・タグ推移など）。</p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -252,7 +239,6 @@ export default function InsightsClient() {
         </div>
       </header>
 
-      {/* 期間フィルタ */}
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
@@ -266,9 +252,7 @@ export default function InsightsClient() {
               onClick={() => setRange("7")}
               className={
                 "rounded-lg px-3 py-1.5 text-xs transition " +
-                (range === "7"
-                  ? "bg-zinc-200 text-zinc-900"
-                  : "text-zinc-200 hover:bg-zinc-900")
+                (range === "7" ? "bg-zinc-200 text-zinc-900" : "text-zinc-200 hover:bg-zinc-900")
               }
             >
               7日
@@ -278,9 +262,7 @@ export default function InsightsClient() {
               onClick={() => setRange("30")}
               className={
                 "rounded-lg px-3 py-1.5 text-xs transition " +
-                (range === "30"
-                  ? "bg-zinc-200 text-zinc-900"
-                  : "text-zinc-200 hover:bg-zinc-900")
+                (range === "30" ? "bg-zinc-200 text-zinc-900" : "text-zinc-200 hover:bg-zinc-900")
               }
             >
               30日
@@ -290,9 +272,7 @@ export default function InsightsClient() {
               onClick={() => setRange("all")}
               className={
                 "rounded-lg px-3 py-1.5 text-xs transition " +
-                (range === "all"
-                  ? "bg-zinc-200 text-zinc-900"
-                  : "text-zinc-200 hover:bg-zinc-900")
+                (range === "all" ? "bg-zinc-200 text-zinc-900" : "text-zinc-200 hover:bg-zinc-900")
               }
             >
               全部
@@ -308,18 +288,13 @@ export default function InsightsClient() {
         </div>
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
           <p className="text-xs text-zinc-400">合計アイテム</p>
-          <p className="mt-1 text-2xl font-semibold text-zinc-100">
-            {summary.totalItems}
-          </p>
+          <p className="mt-1 text-2xl font-semibold text-zinc-100">{summary.totalItems}</p>
         </div>
       </section>
 
-      {/* タグ上位 */}
       <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
         <h2 className="text-sm font-semibold text-zinc-200">タグ上位（#tag）</h2>
-        <p className="mt-1 text-xs text-zinc-500">
-          ※表記ゆれ辞書で統一 / クリックで履歴のタグ検索へ
-        </p>
+        <p className="mt-1 text-xs text-zinc-500">※表記ゆれ辞書で統一 / クリックで履歴のタグ検索へ</p>
 
         {topTags.length === 0 ? (
           <div className="mt-4 rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-400">
@@ -344,14 +319,9 @@ export default function InsightsClient() {
         )}
       </section>
 
-      {/* タグ推移（直近7日） */}
       <section className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
-        <h2 className="text-sm font-semibold text-zinc-200">
-          タグ別の出現推移（直近7日）
-        </h2>
-        <p className="mt-1 text-xs text-zinc-500">
-          ※直近7日で多いタグ上位5件を表示（0の日は0）
-        </p>
+        <h2 className="text-sm font-semibold text-zinc-200">タグ別の出現推移（直近7日）</h2>
+        <p className="mt-1 text-xs text-zinc-500">※直近7日で多いタグ上位5件を表示（0の日は0）</p>
 
         {trend.rows.length === 0 ? (
           <div className="mt-4 rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-400">
@@ -359,7 +329,6 @@ export default function InsightsClient() {
           </div>
         ) : (
           <div className="mt-4 space-y-3">
-            {/* 日付ヘッダ */}
             <div className="grid grid-cols-[120px_repeat(7,1fr)] gap-2 text-xs text-zinc-500">
               <div />
               {trend.ymds.map((ymd) => (
@@ -370,10 +339,7 @@ export default function InsightsClient() {
             </div>
 
             {trend.rows.map((r) => (
-              <div
-                key={r.tag}
-                className="grid grid-cols-[120px_repeat(7,1fr)] items-center gap-2"
-              >
+              <div key={r.tag} className="grid grid-cols-[120px_repeat(7,1fr)] items-center gap-2">
                 <button
                   type="button"
                   onClick={() => goHistoryByTag(r.tag)}
@@ -398,13 +364,9 @@ export default function InsightsClient() {
         )}
       </section>
 
-      {/* タグ辞書モーダル */}
       {dictOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/60"
-            onClick={closeDict}
-          />
+          <div className="absolute inset-0 bg-black/60" onClick={closeDict} />
           <div className="relative w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-950 p-4 shadow-xl">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -507,9 +469,7 @@ export default function InsightsClient() {
               </div>
             </div>
 
-            <p className="mt-3 text-xs text-zinc-500">
-              ※保存後、/history のタグ検索候補にも反映されます（フォーカス復帰で再読込）。
-            </p>
+            <p className="mt-3 text-xs text-zinc-500">※保存後、/history のタグ検索候補にも反映されます（フォーカス復帰で再読込）。</p>
           </div>
         </div>
       ) : null}
