@@ -1,7 +1,7 @@
 /* app/history/HistoryClient.tsx */
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   canonicalizeTag,
@@ -49,11 +49,7 @@ export default function HistoryClient() {
   const mode: SearchMode = searchParams.get("mode") === "tag" ? "tag" : "text";
   const q = searchParams.get("q") ?? "";
 
-  const {
-    aliases,
-    isLoading: isAliasesLoading,
-    requestRefresh: requestAliasesRefresh,
-  } = useTagAliases({
+  const { aliases, requestRefresh: requestAliasesRefresh } = useTagAliases({
     enabled: true,
     refreshOnMount: true,
     refreshOnFocus: true,
@@ -61,24 +57,23 @@ export default function HistoryClient() {
     throttleMs: 500,
   });
 
-  const aliasesObj = useMemo(() => aliases ?? {}, [aliases]);
+  const onDaysRefreshRequested = useCallback(() => {
+    // days側の更新要求に合わせて aliases も更新要求（idle/間引きは store 側で吸収）
+    requestAliasesRefresh();
+  }, [requestAliasesRefresh]);
 
-  const {
-    entries,
-    isLoading: isDaysLoading,
-    requestRefresh: requestDaysRefresh,
-  } = useDaysData({
+  const { entries, isLoading, requestRefresh } = useDaysData({
     enabled: true,
     refreshOnMount: true,
     refreshOnFocus: true,
     refreshOnVisible: true,
     throttleMs: 500,
-    onRefreshRequested: () => requestAliasesRefresh(),
+    onRefreshRequested: onDaysRefreshRequested,
   });
 
   const listEntries: DayEntry[] = useMemo(() => entries ?? [], [entries]);
 
-  const tagQ = useMemo(() => tagQueryCanonical(q, aliasesObj), [q, aliasesObj]);
+  const tagQ = useMemo(() => tagQueryCanonical(q, aliases), [q, aliases]);
 
   const filteredEntries = useMemo(() => {
     const tq = q.trim();
@@ -86,14 +81,14 @@ export default function HistoryClient() {
 
     if (mode === "tag") {
       if (!tagQ) return listEntries;
-      return listEntries.filter((e) => e.day.items.some((it) => itemMatchesTag(it, tagQ, aliasesObj)));
+      return listEntries.filter((e) => e.day.items.some((it) => itemMatchesTag(it, tagQ, aliases)));
     }
 
     return listEntries.filter((e) => {
       if (includesQuery(e.ymd, tq)) return true;
       return e.day.items.some((it) => itemMatchesText(it, tq));
     });
-  }, [listEntries, q, mode, tagQ, aliasesObj]);
+  }, [listEntries, q, mode, tagQ, aliases]);
 
   const [selectedYmd, setSelectedYmd] = useState<string | null>(null);
 
@@ -116,11 +111,11 @@ export default function HistoryClient() {
 
     if (mode === "tag") {
       if (!tagQ) return selected.day.items;
-      return selected.day.items.filter((it) => itemMatchesTag(it, tagQ, aliasesObj));
+      return selected.day.items.filter((it) => itemMatchesTag(it, tagQ, aliases));
     }
 
     return selected.day.items.filter((it) => itemMatchesText(it, tq));
-  }, [selected, q, mode, tagQ, aliasesObj]);
+  }, [selected, q, mode, tagQ, aliases]);
 
   function setQueryToUrl(next: string) {
     router.replace(buildUrl(pathname, next, mode));
@@ -141,13 +136,13 @@ export default function HistoryClient() {
     const count = new Map<string, number>();
     for (const e of listEntries) {
       for (const it of e.day.items) {
-        const tags = extractTags(it.text, aliasesObj);
+        const tags = extractTags(it.text, aliases);
         for (const t of tags) count.set(t, (count.get(t) ?? 0) + 1);
       }
     }
 
     const inv = new Map<string, string[]>();
-    for (const [k, v] of Object.entries(aliasesObj)) {
+    for (const [k, v] of Object.entries(aliases)) {
       const canon = v.trim();
       if (!canon) continue;
       const arr = inv.get(canon) ?? [];
@@ -173,13 +168,7 @@ export default function HistoryClient() {
     });
 
     return filtered.slice(0, 8);
-  }, [listEntries, aliasesObj, q, mode, showSuggest]);
-
-  const isLoading = useMemo(() => {
-    if (isDaysLoading) return true;
-    if (mode === "tag" && isAliasesLoading) return true;
-    return false;
-  }, [isDaysLoading, isAliasesLoading, mode]);
+  }, [listEntries, aliases, q, mode, showSuggest]);
 
   const totalDaysText = useMemo(() => {
     if (isLoading) return "読み込み中…";
@@ -198,7 +187,7 @@ export default function HistoryClient() {
         <button
           type="button"
           onClick={() => {
-            requestDaysRefresh({ force: true, immediate: true });
+            requestRefresh();
             requestAliasesRefresh({ force: true, immediate: true });
           }}
           className="shrink-0 whitespace-nowrap rounded-xl border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900"
@@ -224,7 +213,11 @@ export default function HistoryClient() {
                   onChange={(e) => setQueryToUrl(e.target.value)}
                   onFocus={() => setShowSuggest(true)}
                   onBlur={() => setShowSuggest(false)}
-                  placeholder={mode === "tag" ? "タグ検索（例：#健康 / けんこう / health）" : "本文検索（例：散歩 / 洗い物）"}
+                  placeholder={
+                    mode === "tag"
+                      ? "タグ検索（例：#健康 / けんこう / health）"
+                      : "本文検索（例：散歩 / 洗い物）"
+                  }
                   className="w-full rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
                 />
 
@@ -271,7 +264,9 @@ export default function HistoryClient() {
                   onClick={() => setModeToUrl("text")}
                   className={
                     "rounded-lg px-3 py-1.5 text-xs transition " +
-                    (mode === "text" ? "bg-zinc-200 text-zinc-900" : "text-zinc-200 hover:bg-zinc-900")
+                    (mode === "text"
+                      ? "bg-zinc-200 text-zinc-900"
+                      : "text-zinc-200 hover:bg-zinc-900")
                   }
                 >
                   本文
@@ -281,14 +276,18 @@ export default function HistoryClient() {
                   onClick={() => setModeToUrl("tag")}
                   className={
                     "rounded-lg px-3 py-1.5 text-xs transition " +
-                    (mode === "tag" ? "bg-zinc-200 text-zinc-900" : "text-zinc-200 hover:bg-zinc-900")
+                    (mode === "tag"
+                      ? "bg-zinc-200 text-zinc-900"
+                      : "text-zinc-200 hover:bg-zinc-900")
                   }
                 >
                   タグ
                 </button>
               </div>
 
-              {mode === "tag" ? <p className="text-xs text-zinc-500">※表記ゆれ辞書で統一（/insightsで編集）</p> : null}
+              {mode === "tag" ? (
+                <p className="text-xs text-zinc-500">※表記ゆれ辞書で統一（/insightsで編集）</p>
+              ) : null}
             </div>
           </div>
 
@@ -298,7 +297,9 @@ export default function HistoryClient() {
             </div>
           ) : filteredEntries.length === 0 ? (
             <div className="mt-4 rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-400">
-              {q.trim() ? "一致する履歴がありません。" : "まだ履歴がありません。/today で追加してみましょう。"}
+              {q.trim()
+                ? "一致する履歴がありません。"
+                : "まだ履歴がありません。/today で追加してみましょう。"}
             </div>
           ) : (
             <ul className="mt-4 space-y-2">
@@ -313,7 +314,9 @@ export default function HistoryClient() {
                       onClick={() => setSelectedYmd(e.ymd)}
                       className={
                         "w-full rounded-xl border px-3 py-2 text-left transition " +
-                        (active ? "border-zinc-600 bg-zinc-950/60" : "border-zinc-800 bg-zinc-950/40 hover:bg-zinc-900")
+                        (active
+                          ? "border-zinc-600 bg-zinc-950/60"
+                          : "border-zinc-800 bg-zinc-950/40 hover:bg-zinc-900")
                       }
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -355,7 +358,10 @@ export default function HistoryClient() {
                 ) : (
                   <ul className="mt-2 space-y-2">
                     {visibleItems.map((it) => (
-                      <li key={it.id} className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2">
+                      <li
+                        key={it.id}
+                        className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2"
+                      >
                         <p className="whitespace-pre-wrap break-words text-zinc-100">{it.text}</p>
                         <p className="mt-1 text-xs text-zinc-500">
                           {new Date(it.createdAt).toLocaleString("ja-JP", {

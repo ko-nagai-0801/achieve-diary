@@ -1,19 +1,15 @@
 /* lib/useTagAliases.ts */
 "use client";
 
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import { loadTagAliases, type TagAliases } from "@/lib/diary";
 import {
   getTagAliasesSnapshot,
-  refreshTagAliasesNow,
   requestTagAliasesRefresh,
+  refreshTagAliasesNow,
   subscribeTagAliases,
   type TagAliasesRefreshRequest,
 } from "@/lib/aliases-store";
-import type { TagAliases } from "@/lib/diary";
-
-function getServerSnapshot(): TagAliases | null {
-  return null;
-}
 
 export type UseTagAliasesOptions = {
   enabled?: boolean;
@@ -23,37 +19,58 @@ export type UseTagAliasesOptions = {
   throttleMs?: number;
 };
 
-export type UseTagAliasesResult = {
-  aliases: TagAliases | null;
+function noopUnsubscribe(): void {}
+
+function subscribeNoop(): () => void {
+  return noopUnsubscribe;
+}
+
+function getServerSnapshot(): TagAliases | null {
+  return null;
+}
+
+function getClientSnapshot(): TagAliases | null {
+  if (typeof window === "undefined") return null;
+
+  // 既にロード済みならキャッシュを返す
+  const cached = getTagAliasesSnapshot();
+  if (cached) return cached;
+
+  // 初回レンダーの “空” を避けるため、軽い読み取りでフォールバック
+  return loadTagAliases(window.localStorage);
+}
+
+export function useTagAliases(opts?: UseTagAliasesOptions): {
+  aliases: TagAliases;
   isLoading: boolean;
   requestRefresh: (req?: TagAliasesRefreshRequest) => void;
   refreshNow: () => void;
-};
-
-export function useTagAliases(opts?: UseTagAliasesOptions): UseTagAliasesResult {
+} {
   const enabled = opts?.enabled ?? true;
-
   const refreshOnMount = opts?.refreshOnMount ?? true;
   const refreshOnFocus = opts?.refreshOnFocus ?? true;
   const refreshOnVisible = opts?.refreshOnVisible ?? true;
-
   const throttleMs = opts?.throttleMs ?? 500;
 
-  const aliases = useSyncExternalStore(
-    subscribeTagAliases,
-    getTagAliasesSnapshot,
+  const snapshot = useSyncExternalStore(
+    enabled ? subscribeTagAliases : subscribeNoop,
+    getClientSnapshot,
     getServerSnapshot,
   );
+
+  // 「ロード済みキャッシュがない」= ストア視点では未ロード
+  const isLoading = useMemo(() => {
+    if (!enabled) return false;
+    if (typeof window === "undefined") return true;
+    return getTagAliasesSnapshot() === null;
+  }, [enabled]);
+
+  const aliases = useMemo<TagAliases>(() => snapshot ?? {}, [snapshot]);
 
   const requestRefresh = useCallback(
     (req?: TagAliasesRefreshRequest) => {
       if (!enabled) return;
-
-      requestTagAliasesRefresh({
-        throttleMs: req?.throttleMs ?? throttleMs,
-        force: req?.force,
-        immediate: req?.immediate,
-      });
+      requestTagAliasesRefresh({ throttleMs, ...req });
     },
     [enabled, throttleMs],
   );
@@ -66,7 +83,10 @@ export function useTagAliases(opts?: UseTagAliasesOptions): UseTagAliasesResult 
   useEffect(() => {
     if (!enabled) return;
 
-    if (refreshOnMount) requestRefresh();
+    if (refreshOnMount) {
+      // effect内同期setStateはしない：setTimeoutで “即時” 扱い
+      requestRefresh({ immediate: true });
+    }
 
     const onFocus = () => {
       if (!refreshOnFocus) return;
@@ -87,5 +107,7 @@ export function useTagAliases(opts?: UseTagAliasesOptions): UseTagAliasesResult 
     };
   }, [enabled, refreshOnMount, refreshOnFocus, refreshOnVisible, requestRefresh]);
 
-  return { aliases, isLoading: aliases === null, requestRefresh, refreshNow };
+  return { aliases, isLoading, requestRefresh, refreshNow };
 }
+
+export default useTagAliases;

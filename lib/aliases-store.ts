@@ -1,7 +1,16 @@
 /* lib/aliases-store.ts */
-import { loadTagAliases, type TagAliases } from "@/lib/diary";
+import {
+  loadTagAliases,
+  resetTagAliases,
+  saveTagAliases,
+  type TagAliases,
+} from "@/lib/diary";
 import { runIdle, type CancelFn } from "@/lib/client-scheduler";
-import { DAY_KEY_PREFIX, META_UPDATED_AT_KEY, subscribeStorageMutations } from "@/lib/storage";
+import {
+  DAY_KEY_PREFIX,
+  META_UPDATED_AT_KEY,
+  subscribeStorageMutations,
+} from "@/lib/storage";
 
 type Listener = () => void;
 
@@ -170,4 +179,21 @@ export function requestTagAliasesRefresh(req?: TagAliasesRefreshRequest): void {
 export function notifyTagAliasesMutated(): void {
   markDirty();
   requestTagAliasesRefresh({ force: true, immediate: true });
+}
+
+/**
+ * ✅ 保存処理の呼び忘れ防止：保存＋notify を1関数にまとめる
+ */
+export function saveTagAliasesAndNotify(storage: Storage, aliases: TagAliases): void {
+  saveTagAliases(storage, aliases);
+  notifyTagAliasesMutated();
+}
+
+/**
+ * ✅ リセットも同様に「保存＋notify」で統一
+ */
+export function resetTagAliasesAndNotify(storage: Storage): TagAliases {
+  const next = resetTagAliases(storage);
+  notifyTagAliasesMutated();
+  return next;
 }
