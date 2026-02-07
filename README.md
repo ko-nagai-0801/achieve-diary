@@ -1,36 +1,104 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# achieve-diary
+
+ローカル（`localStorage`）に「今日できたこと」を保存し、**履歴検索**と**簡易インサイト集計**まで行える Next.js アプリです。
+
+- `/today`：今日の「できたこと」を追加・編集・削除（タグ補完あり）
+- `/history`：全日データを一覧・検索（本文/タグ）
+- `/insights`：全日スキャンして集計（総日数/総件数/頻出ワード）＋ **表記ゆれ辞書（aliases）編集**
+
+> データはサーバーではなく **ブラウザの localStorage に保存**されます（端末/ブラウザごとに独立）。
+
+---
+
+## Tech Stack
+
+- Next.js 16.1.6（App Router / Turbopack）
+- TypeScript
+- ESLint
+- UI: Tailwind CSS
+
+---
 
 ## Getting Started
 
-First, run the development server:
+### 1) Install
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2) Dev
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+pnpm dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- http://localhost:3000
 
-## Learn More
+### 3) Lint / Typecheck
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+pnpm run lint
+pnpm exec tsc --noEmit
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Data Storage
 
-## Deploy on Vercel
+- `localStorage` に日別データを保存します
+- ブラウザを変えるとデータは引き継がれません
+- シークレットモード等では保持が不安定な場合があります
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Routes
+
+- `/today`：入力・編集（タグ候補は「表示中だけ」読み込み＆idle集計で体感改善）
+- `/history`：全データ検索（本文/タグ）
+- `/insights`：集計 + 表記ゆれ辞書の編集（保存後に同一タブ即反映）
+
+---
+
+## Project Structure
+
+```
+app/
+  today/      ... Today page (Client)
+  history/    ... History page (Client)
+  insights/   ... Insights page (Client)
+components/
+  today/      ... Today UI parts (AddBox / TodayList / MoodPicker / MemoBox)
+lib/
+  storage.ts          ... localStorage 永続化・キー・同一タブ通知
+  days-store.ts       ... DayEntry の購読/キャッシュ（useSyncExternalStore）
+  days-refresh.ts     ... idle/間引き/二重予約防止
+  aliases-store.ts    ... TagAliases の購読/キャッシュ（useSyncExternalStore）
+  diary.ts            ... tags/aliases の正規化・抽出など
+  tags/*              ... タグ補助（アクティブトークン、候補生成）
+  useDaysData.ts      ... 画面からの入口（enabled条件/更新方針）
+  useTagAliases.ts    ... 辞書の参照口（更新方針を統一）
+  useTagSuggest.ts    ... 候補UI表示中だけ読み込み＆idle集計
+```
+
+詳しくは `lib/README.md` を参照してください。  
+- `lib/README.md`
+
+---
+
+## Development Notes
+
+- TypeScript：`any` は使わない（`unknown` + 型ガード）
+- Effect 内で同期 `setState` はしない（idle / setTimeout 等で制御）
+- 重い処理（全日スキャン・集計）は「必要な時だけ」＋「idleで」実行
+
+---
+
+## License
+
+## License
+
+Copyright (c) 2026 Kou Nagai
+
+このリポジトリは個人開発のため公開しています。
+学習目的での閲覧・参考はOKですが、転載は禁止複製・再配布・商用利用はご遠慮ください。
