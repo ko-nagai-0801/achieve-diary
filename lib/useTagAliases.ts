@@ -2,10 +2,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
-import type { TagAliases } from "@/lib/diary";
+import { loadTagAliases, type TagAliases } from "@/lib/diary";
 import {
   getTagAliasesSnapshot,
-  readTagAliasesFromStorage,
   requestTagAliasesRefresh,
   refreshTagAliasesNow,
   subscribeTagAliases,
@@ -30,15 +29,31 @@ function getServerSnapshot(): TagAliases | null {
   return null;
 }
 
+// ✅ useSyncExternalStore の getSnapshot は「ストア変更がない限り同一参照」を返す必要がある
+// フォールバック（初回レンダーの“空”回避）は module-scope で1回だけ生成して使い回す
+let fallbackSnapshot: TagAliases | null = null;
+
+function getFallbackSnapshot(): TagAliases {
+  if (fallbackSnapshot) return fallbackSnapshot;
+
+  if (typeof window === "undefined") {
+    fallbackSnapshot = {};
+    return fallbackSnapshot;
+  }
+
+  fallbackSnapshot = loadTagAliases(window.localStorage);
+  return fallbackSnapshot;
+}
+
 function getClientSnapshot(): TagAliases | null {
   if (typeof window === "undefined") return null;
 
-  // 既にロード済みならキャッシュを返す
+  // 既にロード済みならキャッシュを返す（参照はストアが保持）
   const cached = getTagAliasesSnapshot();
   if (cached) return cached;
 
-  // 初回レンダーの “空” を避けるため、軽い読み取りでフォールバック（入口は aliases-store に統一）
-  return readTagAliasesFromStorage(window.localStorage);
+  // 初回レンダーの “空” を避けるフォールバック（参照固定）
+  return getFallbackSnapshot();
 }
 
 export function useTagAliases(opts?: UseTagAliasesOptions): {
@@ -85,7 +100,7 @@ export function useTagAliases(opts?: UseTagAliasesOptions): {
     if (!enabled) return;
 
     if (refreshOnMount) {
-      // effect内同期setStateはしない：setTimeoutで “即時” 扱い
+      // effect内同期setStateはしない：request側で immediate(setTimeout) に寄せる
       requestRefresh({ immediate: true });
     }
 
