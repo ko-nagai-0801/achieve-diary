@@ -1,4 +1,8 @@
-/* lib/days-store.ts */
+/* lib/days-store.ts
+ * DayEntry をキャッシュして subscribe/snapshot を提供（useSyncExternalStore向け）
+ * refresh/idle/間引き/二重予約防止は lib/days-refresh.ts に委譲
+ */
+
 import {
   DAY_KEY_PREFIX,
   META_UPDATED_AT_KEY,

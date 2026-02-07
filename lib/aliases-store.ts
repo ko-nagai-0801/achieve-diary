@@ -1,4 +1,8 @@
-/* lib/aliases-store.ts */
+/* lib/aliases-store.ts
+ * TagAliases をキャッシュして subscribe/snapshot を提供（useSyncExternalStore向け）
+ * 同一タブ即反映は notifyTagAliasesMutated()（保存UIの直後に呼ぶ）
+ */
+
 import {
   loadTagAliases,
   resetTagAliases,
