@@ -2,9 +2,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
-import { loadTagAliases, type TagAliases } from "@/lib/diary";
+import type { TagAliases } from "@/lib/diary";
 import {
   getTagAliasesSnapshot,
+  readTagAliasesFromStorage,
   requestTagAliasesRefresh,
   refreshTagAliasesNow,
   subscribeTagAliases,
@@ -36,8 +37,8 @@ function getClientSnapshot(): TagAliases | null {
   const cached = getTagAliasesSnapshot();
   if (cached) return cached;
 
-  // 初回レンダーの “空” を避けるため、軽い読み取りでフォールバック
-  return loadTagAliases(window.localStorage);
+  // 初回レンダーの “空” を避けるため、軽い読み取りでフォールバック（入口は aliases-store に統一）
+  return readTagAliasesFromStorage(window.localStorage);
 }
 
 export function useTagAliases(opts?: UseTagAliasesOptions): {

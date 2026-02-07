@@ -113,6 +113,14 @@ function detachExternal(): void {
   detachStorageMutation = null;
 }
 
+/**
+ * ✅ useTagAliases 側の「初回レンダーの空回避」用フォールバック
+ * （UIは diary.ts を直接触らず、入口を aliases-store に統一する）
+ */
+export function readTagAliasesFromStorage(storage: Storage): TagAliases {
+  return loadTagAliases(storage);
+}
+
 export function getTagAliasesSnapshot(): TagAliases | null {
   if (!isBrowser()) return null;
   if (!loaded) return null;
